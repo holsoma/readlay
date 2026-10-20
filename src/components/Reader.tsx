@@ -164,7 +164,9 @@ function ReaderContent({ book, chapters, editionId }: ReaderProps) {
       setCharOffset(next.charOffset);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [ready, resumeReady, isSignedIn, syncStatus, mode, progress, chapters]);
+  // Local coordinates also acknowledge saves that Provider deduplicates because
+  // its projected position already matches, without publishing a new snapshot.
+  }, [ready, resumeReady, isSignedIn, syncStatus, mode, progress, chapters, chapterIndex, paragraphIndex, charOffset]);
 
   useEffect(() => {
     if (!resumeReady || !article.current || pendingScroll.current === null) return;

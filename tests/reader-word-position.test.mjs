@@ -166,3 +166,14 @@ test("the initial cloud snapshot does not override an explicitly opened bookmark
   assert.equal(app.player().location.paragraphIndex, 0);
   assert.equal(app.player().location.charOffset, 6);
 });
+
+test("clicking the cloud's existing position from a bookmark does not block later remote progress", async (t) => {
+  const app = readerHarness({ chapterIndex: 0, paragraphIndex: 0, charOffset: 0 }, { search: "?chapter=0&paragraph=1&offset=5" }); t.after(() => app.cleanup()); await app.settle();
+  app.clickWord(0, 0); await app.settle();
+  assert.equal(app.player().location.paragraphIndex, 0);
+  assert.equal(app.player().location.charOffset, 0);
+  // Provider deduplicates this save because its current projection is already P.
+  // No Provider object update occurs before the later external snapshot R.
+  app.updateProgress({ chapterIndex: 0, paragraphIndex: 0, charOffset: 6 }); await app.settle();
+  assert.equal(app.player().location.charOffset, 6);
+});
