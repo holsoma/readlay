@@ -15,7 +15,7 @@ function text(tree) {
 const entry = { word: "habit", phonetic: "/ˈhæbɪt/", audioUrl: null, meanings: [{ partOfSpeech: "noun", definitions: [{ definition: "An action repeated regularly." }] }], sourceUrl: null, licence: null };
 function harness({ signedIn = true, saved = [], save = async () => ({}), anchor = { left: 360, right: 380, top: 790, bottom: 815, width: 20, height: 25 }, popupHeight = 330, word = "habit" } = {}) {
   let cursor = 0, dirty = true, tree, mounted = true;
-  const slots = [], effects = [], requests = [], notices = [], positions = [], listeners = new Map(), frames = [];
+  const slots = [], effects = [], requests = [], notices = [], positions = [], listeners = new Map(), frames = [], observers = [];
   let closed = 0, auth = 0, positionsUsed = 0;
   const unchanged = (old, deps) => old && deps && deps.length === old.deps?.length && deps.every((item, index) => Object.is(item, old.deps[index]));
   const react = {
@@ -28,14 +28,14 @@ function harness({ signedIn = true, saved = [], save = async () => ({}), anchor 
   const props = { selection, bookId: "book", editionId: "edition", getAnchor: () => selection.anchor, onClose: () => closed++, onUsePosition: () => positionsUsed++ };
   const Popup = loadTypeScript("src/components/DictionaryPopup.tsx", {
     stubs: { react, "next/link": "link", "react/jsx-runtime": { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) }, "lucide-react": { BookOpen: "icon", Check: "icon", Plus: "icon", X: "icon" }, "./WordBankProvider": { useWordBank: () => ({ words: saved, ready: true, isSignedIn: signedIn, saveWord: save }) }, "./ReadlayProvider": { useReadlay: () => ({ openAuth: () => auth++, notify: (message) => notices.push(message) }) }, "./PronunciationButton": { PronunciationButton: "pronunciation" }, "@/lib/dictionary-client": { lookupDictionaryInBrowser: (word, signal) => new Promise((resolve, reject) => requests.push({ word, options: { signal }, resolve, reject })) } },
-    globals: { Error, fetch: (url, options) => new Promise((resolve, reject) => requests.push({ url, options, resolve, reject })), window: { innerWidth: 390, innerHeight: 844, requestAnimationFrame: (fn) => { frames.push(fn); return frames.length; }, cancelAnimationFrame() {}, addEventListener() {}, removeEventListener() {} }, document: { addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: (name) => listeners.delete(name) } },
+    globals: { Error, ResizeObserver: class { constructor(callback) { this.callback = callback; observers.push(this); } observe(target) { this.target = target; } disconnect() { this.disconnected = true; } }, fetch: (url, options) => new Promise((resolve, reject) => requests.push({ url, options, resolve, reject })), window: { innerWidth: 390, innerHeight: 844, requestAnimationFrame: (fn) => { frames.push(fn); return frames.length; }, cancelAnimationFrame() {}, addEventListener() {}, removeEventListener() {} }, document: { addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: (name) => listeners.delete(name) } },
   }).default;
   const element = { contains: (target) => target?.inside, getBoundingClientRect: () => ({ height: popupHeight }), focus() {} };
   function render() { cursor = 0; dirty = false; tree = Popup(props); tree.props.ref.current = element; effects.splice(0).forEach((effect) => effect()); frames.splice(0).forEach((frame) => frame()); if (tree.props.style.visibility === "visible") positions.push(tree.props.style); }
   async function settle() { for (let i = 0; i < 8; i++) { if (dirty && mounted) render(); await new Promise((resolve) => setTimeout(resolve, 1)); } }
   function response(status, body) { if (status >= 200 && status < 300) requests.at(-1).resolve(body); else requests.at(-1).reject(Object.assign(new Error(body.error), { status })); }
   render();
-  return { requests, response, settle, notices, positions, text: () => text(tree), element: (predicate) => find(tree, predicate), button: (label) => find(tree, (node) => node.type === "button" && text(node).includes(label)), style: () => tree.props.style, closed: () => closed, auth: () => auth, positionsUsed: () => positionsUsed, dismiss: (target) => listeners.get("pointerdown")?.({ target }), escape: () => listeners.get("keydown")?.({ key: "Escape", preventDefault() {} }), cleanup() { mounted = false; for (const slot of slots) slot?.cleanup?.(); } };
+  return { requests, response, settle, notices, positions, observers, resize(height) { popupHeight = height; observers.findLast((observer) => !observer.disconnected)?.callback(); }, text: () => text(tree), element: (predicate) => find(tree, predicate), button: (label) => find(tree, (node) => node.type === "button" && text(node).includes(label)), style: () => tree.props.style, closed: () => closed, auth: () => auth, positionsUsed: () => positionsUsed, dismiss: (target) => listeners.get("pointerdown")?.({ target }), escape: () => listeners.get("keydown")?.({ key: "Escape", preventDefault() {} }), cleanup() { mounted = false; for (const slot of slots) slot?.cleanup?.(); } };
 }
 
 test("popup shows loading, missing and retried definitions, and clamps to a small viewport", async (t) => {
@@ -51,7 +51,8 @@ test("popup shows loading, missing and retried definitions, and clamps to a smal
   assert.equal(app.requests.length, 2);
   app.response(200, { query: "habit", entry }); await app.settle();
   assert.ok(app.text().includes("An action repeated regularly."));
-  assert.ok(app.text().includes("Pronunciation audio is unavailable"));
+  const pronunciation = app.element((node) => node.type === "pronunciation");
+  assert.equal(pronunciation.props.audioUrl, null, "the shared control can offer device pronunciation without recorded audio");
 });
 
 test("saving sends source coordinates and the displayed dictionary snapshot, reports failures and allows a retry", async (t) => {
@@ -125,4 +126,26 @@ test("one concise primary definition keeps actions ahead of native More meanings
   assert.ok(text(details).includes("To become accustomed to something."));
   assert.ok(app.text().indexOf("Save to Word Bank") < app.text().indexOf("More meanings"));
   assert.ok(app.text().indexOf("Set reading place") < app.text().indexOf("More meanings"));
+});
+
+test("fallback definitions visibly credit the provider and retain dictionary source and licence", async (t) => {
+  const app = harness(); t.after(() => app.cleanup());
+  const attributed = { ...entry, providerName: "FreeDictionaryAPI.com", providerUrl: "https://freedictionaryapi.com/", sourceUrl: "https://en.wiktionary.org/wiki/habit", licence: { name: "CC BY-SA 4.0", url: "https://creativecommons.org/licenses/by-sa/4.0/" } };
+  app.response(200, { query: "habit", entry: attributed }); await app.settle();
+  const credit = app.element((node) => node.props?.className === "reader-dictionary-provider");
+  assert.ok(text(credit).includes("Definitions: FreeDictionaryAPI.com"));
+  assert.equal(app.element((node) => node.type === "a" && text(node) === "FreeDictionaryAPI.com").props.href, attributed.providerUrl);
+  assert.equal(app.element((node) => node.type === "a" && text(node) === "Dictionary source").props.href, attributed.sourceUrl);
+  assert.equal(app.element((node) => node.type === "a" && text(node) === "CC BY-SA 4.0").props.href, attributed.licence.url);
+});
+
+test("child pronunciation height changes reposition the popup and observers disconnect on unmount", async () => {
+  const anchor = { left: 100, right: 160, top: 500, bottom: 525, width: 60, height: 25 };
+  const app = harness({ anchor, popupHeight: 120 }); await app.settle();
+  assert.ok(app.style().top > anchor.bottom);
+  app.resize(400); await app.settle();
+  assert.ok(app.style().top + Math.min(400, app.style().maxHeight) <= anchor.top - 9 || app.style().top >= anchor.bottom + 9);
+  assert.ok(app.style().top >= 12);
+  app.cleanup();
+  assert.ok(app.observers.every((observer) => observer.disconnected));
 });

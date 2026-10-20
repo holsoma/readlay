@@ -22,6 +22,7 @@ const nextConfig: NextConfig = {
       ".local/audio-cache/**/*",
       ".local/audio-models/**/*",
       ".local/verification-runtime/**/*",
+      ".local/*-qa/**/*",
       ".local/**/*.mp3",
       ".local/**/*.opus",
       ".local/**/*.epub",

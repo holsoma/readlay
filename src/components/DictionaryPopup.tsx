@@ -86,11 +86,14 @@ export default function DictionaryPopup({ selection, bookId, editionId, getAncho
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(position);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(position);
+    if (popup.current) observer?.observe(popup.current);
     window.addEventListener("resize", position);
     window.addEventListener("scroll", position, true);
     window.visualViewport?.addEventListener("resize", position);
     window.visualViewport?.addEventListener("scroll", position);
     return () => {
+      observer?.disconnect();
       window.cancelAnimationFrame(frame);
       window.removeEventListener("resize", position);
       window.removeEventListener("scroll", position, true);
@@ -128,14 +131,14 @@ export default function DictionaryPopup({ selection, bookId, editionId, getAncho
 
   return <div ref={popup} className="reader-dictionary" role="dialog" aria-modal="false" aria-labelledby="dictionary-word-title" tabIndex={-1} style={placement} onPointerDown={(event) => event.stopPropagation()}>
     <div className="reader-dictionary-heading"><span>Dictionary</span><button className="reader-icon-button" aria-label="Close dictionary" onClick={onClose}><X size={17} /></button></div>
-    <div className="reader-dictionary-word"><h2 id="dictionary-word-title">{selection.selectedText}</h2>{entry?.audioUrl && <PronunciationButton word={entry.word} audioUrl={entry.audioUrl} />}</div>
+    <div className="reader-dictionary-word"><h2 id="dictionary-word-title">{selection.selectedText}</h2>{entry && <PronunciationButton word={entry.word} audioUrl={entry.audioUrl} />}</div>
     {entry?.phonetic && <p className="reader-dictionary-phonetic">{entry.phonetic}</p>}
+    {entry?.providerName && <p className="reader-dictionary-provider">Definitions: {entry.providerUrl ? <a href={entry.providerUrl} target="_blank" rel="noreferrer">{entry.providerName}</a> : entry.providerName}</p>}
     {entry && entry.word.toLocaleLowerCase("en") !== selection.word && <p className="reader-dictionary-base">Definition of <strong>{entry.word}</strong></p>}
     {state.kind === "loading" && <p className="reader-dictionary-message" role="status">Looking up this word…</p>}
     {(state.kind === "missing" || state.kind === "error") && <div className="reader-dictionary-message" role="status"><p>{state.message}</p>{lookupWord && <button className="reader-dictionary-retry" onClick={() => { setState({ kind: "loading" }); setAttempt((value) => value + 1); }}>Try again</button>}</div>}
     {entry && <>
       {primaryMeaning && <div className="reader-dictionary-meanings reader-dictionary-primary"><section><h3>{primaryMeaning.partOfSpeech}</h3><p>{conciseDefinition}</p></section></div>}
-      {!entry.audioUrl && <p className="reader-dictionary-unavailable">Pronunciation audio is unavailable for this word.</p>}
       <div className="reader-dictionary-actions"><button className="reader-dictionary-save" disabled={saving || savedHere || (isSignedIn && !ready)} onClick={() => void save()}>{savedHere ? <Check size={15} /> : <Plus size={15} />}{savedHere ? "Already in Word Bank" : saving ? "Saving…" : savedWord ? "Save this occurrence" : isSignedIn ? "Save to Word Bank" : "Sign in to save"}</button><Link href="/word-bank" aria-label="Open Word Bank"><BookOpen size={16} /></Link></div>
       {savedWord && !savedHere && <p className="reader-dictionary-saved-note">Already in Word Bank. Save this location too.</p>}
       {saveError && <p className="reader-dictionary-save-error" role="alert">{saveError}</p>}

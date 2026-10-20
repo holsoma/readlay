@@ -27,6 +27,7 @@ function Meanings({ meaning, from = 0, count }: { meaning: DictionaryMeaning; fr
 
 function Attribution({ entry }: { entry: DictionaryEntry }) {
   return <div className="word-bank-attribution">
+    {entry.providerName && entry.providerUrl && <a href={entry.providerUrl} target="_blank" rel="noreferrer">{entry.providerName}</a>}
     {entry.sourceUrl && <a href={entry.sourceUrl} target="_blank" rel="noreferrer">Definition source<ArrowUpRight size={12} aria-hidden="true" /></a>}
     {entry.licence && <a href={entry.licence.url} target="_blank" rel="noreferrer">{entry.licence.name}</a>}
     {entry.pronunciationSourceUrl && <a href={entry.pronunciationSourceUrl} target="_blank" rel="noreferrer">Audio source</a>}

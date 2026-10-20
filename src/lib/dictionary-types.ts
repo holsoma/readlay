@@ -19,6 +19,8 @@ export type DictionaryEntry = {
   licence: DictionaryLicence | null;
   pronunciationSourceUrl?: string | null;
   pronunciationLicence?: DictionaryLicence | null;
+  providerName?: "Dictionary API" | "FreeDictionaryAPI.com" | null;
+  providerUrl?: "https://dictionaryapi.dev/" | "https://freedictionaryapi.com/" | null;
 };
 
 export type DictionaryLookup = { query: string; entry: DictionaryEntry };
@@ -53,10 +55,17 @@ export function parseDictionaryEntry(value: unknown): DictionaryEntry | null {
     const url = safeDictionarySourceUrl(data.url);
     return cleanText(data.name, 100) && url ? { name: data.name, url } : null;
   };
+  const provider = entry.providerName === "Dictionary API" && entry.providerUrl === "https://dictionaryapi.dev/"
+    ? { providerName: "Dictionary API", providerUrl: "https://dictionaryapi.dev/" } as const
+    : entry.providerName === "FreeDictionaryAPI.com" && entry.providerUrl === "https://freedictionaryapi.com/"
+      ? { providerName: "FreeDictionaryAPI.com", providerUrl: "https://freedictionaryapi.com/" } as const
+      : entry.providerName == null && entry.providerUrl == null ? {} : null;
+  if (!provider) return null;
   return {
     word, phonetic: cleanText(entry.phonetic, 200) ? entry.phonetic : null,
     audioUrl: safePronunciationUrl(entry.audioUrl), meanings,
     sourceUrl: safeDictionarySourceUrl(entry.sourceUrl), licence: parseLicence(entry.licence),
     pronunciationSourceUrl: safeDictionarySourceUrl(entry.pronunciationSourceUrl), pronunciationLicence: parseLicence(entry.pronunciationLicence),
+    ...provider,
   };
 }

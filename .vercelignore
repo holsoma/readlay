@@ -16,6 +16,8 @@ scripts/__pycache__
 .local/audio-cache
 .local/audio-models
 .local/verification-runtime
+.local/dictionary-qa
+.local/word-qa
 .local/*.mjs
 .local/*.py
 .local/*.log
