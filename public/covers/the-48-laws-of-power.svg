@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900" role="img" aria-labelledby="title desc">
+  <title id="title">The 48 Laws of Power by Robert Greene</title>
+  <desc id="desc">An original Readlay concept cover in black and mustard, with an angular stepped line.</desc>
+  <rect width="600" height="900" fill="#292D27"/>
+  <path d="M28 0V900" stroke="#EEEBDD" stroke-opacity=".2"/>
+  <text x="62" y="81" font-family="Arial, sans-serif" font-size="20" letter-spacing="3" fill="#EEEBDD">ROBERT GREENE</text>
+  <text x="58" y="218" font-family="Georgia, serif" font-size="83" letter-spacing="-3.5" fill="#EEEBDD">The 48</text>
+  <text x="58" y="309" font-family="Georgia, serif" font-size="83" letter-spacing="-3.5" fill="#EEEBDD">Laws of</text>
+  <text x="58" y="400" font-family="Georgia, serif" font-size="83" letter-spacing="-3.5" fill="#EEEBDD">Power</text>
+  <path d="M81 756V673H190V590H300V507H410V447H520V756Z" fill="none" stroke="#D5B96C" stroke-width="3"/>
+  <path d="M81 756L520 447" stroke="#D5B96C" stroke-width="3"/>
+  <circle cx="300" cy="602" r="12" fill="#EEEBDD"/>
+  <text x="62" y="843" font-family="Arial, sans-serif" font-size="13" letter-spacing="2.1" fill="#EEEBDD">READLAY CONCEPT COVER</text>
+</svg>

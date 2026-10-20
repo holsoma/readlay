@@ -1,0 +1,68 @@
+{
+  "atomic-habits": {
+    "editionId": "f499e538de3e7e0a",
+    "wordCount": 77553,
+    "readingMinutes": 311,
+    "chapterCount": 28,
+    "paragraphCount": 2331,
+    "omittedImageCount": 46
+  },
+  "seven-habits": {
+    "editionId": "b17d5f5bc348f3d6",
+    "wordCount": 61356,
+    "readingMinutes": 246,
+    "chapterCount": 10,
+    "paragraphCount": 1454,
+    "omittedImageCount": 40,
+    "isComplete": false,
+    "availabilityNote": "The supplied file ends during Habit 4. Habits 5 to 7 are missing."
+  },
+  "win-friends": {
+    "editionId": "4e90894c75296431",
+    "wordCount": 77872,
+    "readingMinutes": 312,
+    "chapterCount": 32,
+    "paragraphCount": 1958,
+    "omittedImageCount": 1
+  },
+  "laws-of-power": {
+    "editionId": "e43027f07c709097",
+    "wordCount": 218008,
+    "readingMinutes": 873,
+    "chapterCount": 50,
+    "paragraphCount": 4137,
+    "omittedImageCount": 1
+  },
+  "subconscious-mind": {
+    "editionId": "c98873136c8da921",
+    "wordCount": 68402,
+    "readingMinutes": 274,
+    "chapterCount": 21,
+    "paragraphCount": 1321,
+    "omittedImageCount": 1
+  },
+  "rich-dad-poor-dad": {
+    "editionId": "a67e1b444eeb3bf2",
+    "wordCount": 56726,
+    "readingMinutes": 227,
+    "chapterCount": 13,
+    "paragraphCount": 1196,
+    "omittedImageCount": 127
+  },
+  "five-am-club": {
+    "editionId": "632fb4d3a612b663",
+    "wordCount": 95715,
+    "readingMinutes": 383,
+    "chapterCount": 20,
+    "paragraphCount": 1863,
+    "omittedImageCount": 37
+  },
+  "power-of-now": {
+    "editionId": "aac08d28563dc86c",
+    "wordCount": 62743,
+    "readingMinutes": 251,
+    "chapterCount": 81,
+    "paragraphCount": 755,
+    "omittedImageCount": 1
+  }
+}

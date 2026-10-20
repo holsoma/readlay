@@ -1,0 +1,20 @@
+{
+  "editionId": "original-fixture-v1",
+  "chapters": [
+    {
+      "id": "a-small-start",
+      "title": "A small start",
+      "paragraphs": [
+        "A book waits beside the window. Read one paragraph, then carry that thought into the day.",
+        "You can pause here. When you return, the next small step will still be waiting."
+      ]
+    },
+    {
+      "id": "a-quiet-return",
+      "title": "A quiet return",
+      "paragraphs": [
+        "The page remembers the place. Listening and reading can share the same path."
+      ]
+    }
+  ]
+}

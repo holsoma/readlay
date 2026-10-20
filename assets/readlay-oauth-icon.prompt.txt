@@ -1,0 +1,4 @@
+Tool: built-in image_gen
+Reference: src/app/icon.svg, rendered to a PNG for reference.
+
+Use case: logo-brand. Asset type: square GitHub OAuth application profile image for Readlay. Create one final flat 1024x1024 PNG based faithfully on the supplied Readlay logo reference. Preserve the exact two parallel cream bookmark ribbons, their relative widths, spacing, alignment and unequal bottom lengths, and their V-shaped notches. Centre the mark with generous margins, like the reference, so it remains legible as a small avatar. Use a solid forest-green #315b45 background covering the entire square, and warm cream #f7f8f5 for the ribbons. Crisp clean edges, completely flat colour. No text, no added symbols, no shadows, no lighting, no gradients, no texture, no border, no surrounding presentation or mock-up. The output is only the upload-ready app icon.

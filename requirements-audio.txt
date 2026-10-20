@@ -1,0 +1,8 @@
+# Local preparation only. Do not install these in Vercel or the Next.js runtime.
+# Kokoro 0.9.4 supports Python >=3.10,<3.14. Python 3.12 is recommended.
+kokoro==0.9.4
+misaki[en]==0.9.4
+numpy>=1.26,<3
+# Kokoro installs PyTorch, spaCy, huggingface_hub and transformers transitively.
+# Once installed: python -m spacy download en_core_web_sm
+# ffmpeg and ffprobe are separate command-line tools and must be on PATH.

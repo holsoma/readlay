@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Rich Dad Poor Dad by Robert T. Kiyosaki</title>
+  <desc id="desc">An original Readlay concept cover in cream and dark green, with two contrasting stair forms.</desc>
+  <rect width="600" height="900" fill="#E6DDCA"/>
+  <path d="M28 0V900" stroke="#29342E" stroke-opacity=".2"/>
+  <text x="62" y="81" font-family="Arial, sans-serif" font-size="20" letter-spacing="2" fill="#29342E">ROBERT T. KIYOSAKI</text>
+  <text x="58" y="242" font-family="Georgia, serif" font-size="91" letter-spacing="-4" fill="#29342E">Rich Dad</text>
+  <text x="58" y="344" font-family="Georgia, serif" font-size="91" letter-spacing="-4" fill="#29342E">Poor Dad</text>
+  <path d="M68 744V657H151V574H234V491H317V744Z" fill="#315B45"/>
+  <path d="M317 744V657H400V574H483V491H532V744Z" fill="#A9B9A5"/>
+  <path d="M68 764H532" stroke="#29342E" stroke-width="2"/>
+  <text x="62" y="843" font-family="Arial, sans-serif" font-size="13" letter-spacing="2.1" fill="#29342E">READLAY CONCEPT COVER</text>
+</svg>

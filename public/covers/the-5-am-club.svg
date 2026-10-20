@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900" role="img" aria-labelledby="title desc">
+  <title id="title">The 5 AM Club by Robin Sharma</title>
+  <desc id="desc">An original Readlay concept cover in terracotta and cream, with a clock showing five o'clock.</desc>
+  <rect width="600" height="900" fill="#CF7554"/>
+  <path d="M28 0V900" stroke="#292D27" stroke-opacity=".2"/>
+  <text x="62" y="81" font-family="Arial, sans-serif" font-size="20" letter-spacing="3" fill="#292D27">ROBIN SHARMA</text>
+  <text x="58" y="212" font-family="Georgia, serif" font-size="63" letter-spacing="-2" fill="#292D27">The</text>
+  <text x="58" y="326" font-family="Georgia, serif" font-size="110" letter-spacing="-5" fill="#292D27">5 AM Club</text>
+  <circle cx="330" cy="607" r="162" fill="#F2EFE5"/>
+  <g fill="none" stroke="#292D27" stroke-width="2">
+    <circle cx="330" cy="607" r="139"/>
+    <path d="M330 468V484M330 730V746M191 607H207M453 607H469"/>
+  </g>
+  <path d="M330 607V501M330 607L381 696" fill="none" stroke="#292D27" stroke-width="7"/>
+  <circle cx="330" cy="607" r="9" fill="#CF7554"/>
+  <text x="62" y="843" font-family="Arial, sans-serif" font-size="13" letter-spacing="2.1" fill="#292D27">READLAY CONCEPT COVER</text>
+</svg>

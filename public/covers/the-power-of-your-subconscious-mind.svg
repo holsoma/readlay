@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900" role="img" aria-labelledby="title desc">
+  <title id="title">The Power of Your Subconscious Mind by Joseph Murphy</title>
+  <desc id="desc">An original Readlay concept cover in sage green, with concentric circles.</desc>
+  <rect width="600" height="900" fill="#A9B9A5"/>
+  <path d="M28 0V900" stroke="#29342E" stroke-opacity=".2"/>
+  <text x="62" y="81" font-family="Arial, sans-serif" font-size="20" letter-spacing="3" fill="#29342E">JOSEPH MURPHY</text>
+  <g font-family="Georgia, serif" fill="#29342E" letter-spacing="-2.2">
+    <text x="58" y="202" font-size="61">The Power</text>
+    <text x="58" y="272" font-size="61">of Your</text>
+    <text x="58" y="342" font-size="57">Subconscious</text>
+    <text x="58" y="412" font-size="61">Mind</text>
+  </g>
+  <g fill="none" stroke="#29342E" stroke-width="2">
+    <circle cx="330" cy="624" r="151"/>
+    <circle cx="330" cy="624" r="117"/>
+    <circle cx="330" cy="624" r="83"/>
+    <circle cx="330" cy="624" r="49"/>
+  </g>
+  <circle cx="330" cy="624" r="16" fill="#F2EFE5"/>
+  <path d="M64 624H314" stroke="#F2EFE5" stroke-width="2"/>
+  <text x="62" y="843" font-family="Arial, sans-serif" font-size="13" letter-spacing="2.1" fill="#29342E">READLAY CONCEPT COVER</text>
+</svg>

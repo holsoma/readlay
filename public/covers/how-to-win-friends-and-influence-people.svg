@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900" role="img" aria-labelledby="title desc">
+  <title id="title">How to Win Friends and Influence People by Dale Carnegie</title>
+  <desc id="desc">An original Readlay concept cover in rust and cream, with two connected forms.</desc>
+  <rect width="600" height="900" fill="#CF7554"/>
+  <path d="M28 0V900" stroke="#292D27" stroke-opacity=".2"/>
+  <text x="62" y="81" font-family="Arial, sans-serif" font-size="20" letter-spacing="3" fill="#292D27">DALE CARNEGIE</text>
+  <text x="59" y="211" font-family="Georgia, serif" font-size="66" letter-spacing="-2" fill="#292D27">How to Win</text>
+  <text x="59" y="284" font-family="Georgia, serif" font-size="66" letter-spacing="-2" fill="#292D27">Friends and</text>
+  <text x="59" y="357" font-family="Georgia, serif" font-size="66" letter-spacing="-2" fill="#292D27">Influence</text>
+  <text x="59" y="430" font-family="Georgia, serif" font-size="66" letter-spacing="-2" fill="#292D27">People</text>
+  <path d="M137 660C137 584 199 523 275 523H284V661C284 737 222 799 146 799H137Z" fill="#F2EFE5"/>
+  <path d="M316 660C316 584 378 523 454 523H463V661C463 737 401 799 325 799H316Z" fill="#292D27"/>
+  <path d="M235 650H366" stroke="#D5B96C" stroke-width="3"/>
+  <text x="62" y="858" font-family="Arial, sans-serif" font-size="13" letter-spacing="2.1" fill="#292D27">READLAY CONCEPT COVER</text>
+</svg>

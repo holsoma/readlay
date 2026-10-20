@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900" role="img" aria-labelledby="title desc">
+  <title id="title">The 7 Habits of Highly Effective People by Stephen R. Covey</title>
+  <desc id="desc">An original Readlay concept cover in mustard and black, with seven rising lines.</desc>
+  <rect width="600" height="900" fill="#D5B96C"/>
+  <path d="M28 0V900" stroke="#292D27" stroke-opacity=".2"/>
+  <text x="62" y="81" font-family="Arial, sans-serif" font-size="20" letter-spacing="2" fill="#292D27">STEPHEN R. COVEY</text>
+  <text x="58" y="208" font-family="Georgia, serif" font-size="69" letter-spacing="-2.7" fill="#292D27">The 7 Habits</text>
+  <text x="62" y="273" font-family="Georgia, serif" font-size="52" letter-spacing="-1.5" fill="#292D27">of Highly</text>
+  <text x="62" y="336" font-family="Georgia, serif" font-size="52" letter-spacing="-1.5" fill="#292D27">Effective People</text>
+  <g fill="#292D27">
+    <rect x="69" y="664" width="47" height="83"/>
+    <rect x="137" y="627" width="47" height="120"/>
+    <rect x="205" y="590" width="47" height="157"/>
+    <rect x="273" y="553" width="47" height="194"/>
+    <rect x="341" y="516" width="47" height="231"/>
+    <rect x="409" y="479" width="47" height="268"/>
+    <rect x="477" y="442" width="47" height="305"/>
+  </g>
+  <text x="62" y="843" font-family="Arial, sans-serif" font-size="13" letter-spacing="2.1" fill="#292D27">READLAY CONCEPT COVER</text>
+</svg>
