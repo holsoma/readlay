@@ -73,7 +73,12 @@ export default function DictionaryPopup({ selection, bookId, editionId, getAncho
     const margin = 12;
     const boxWidth = Math.min(360, width - margin * 2);
     const maximumHeight = Math.min(460, height - margin * 2);
-    const naturalHeight = Math.min(box.getBoundingClientRect().height, maximumHeight);
+    // A loading popup can already be constrained by the available space below.
+    // Read its complete contents, rather than treating that earlier cap as the
+    // natural height when definitions or pronunciation controls arrive.
+    const borderHeight = Math.max(0, box.offsetHeight - box.clientHeight);
+    const contentHeight = box.scrollHeight + borderHeight;
+    const naturalHeight = Math.min(Math.max(box.getBoundingClientRect().height, contentHeight), maximumHeight);
     const below = topEdge + height - margin - anchor.bottom - 10;
     const above = anchor.top - topEdge - margin - 10;
     const placeBelow = below >= naturalHeight || (above < naturalHeight && below >= above);

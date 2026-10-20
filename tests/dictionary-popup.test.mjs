@@ -13,7 +13,7 @@ function text(tree) {
   return typeof tree === "string" ? tree : "";
 }
 const entry = { word: "habit", phonetic: "/ˈhæbɪt/", audioUrl: null, meanings: [{ partOfSpeech: "noun", definitions: [{ definition: "An action repeated regularly." }] }], sourceUrl: null, licence: null };
-function harness({ signedIn = true, saved = [], save = async () => ({}), anchor = { left: 360, right: 380, top: 790, bottom: 815, width: 20, height: 25 }, popupHeight = 330, word = "habit" } = {}) {
+function harness({ signedIn = true, saved = [], save = async () => ({}), anchor = { left: 360, right: 380, top: 790, bottom: 815, width: 20, height: 25 }, popupHeight = 330, popupScrollHeight = popupHeight - 2, word = "habit" } = {}) {
   let cursor = 0, dirty = true, tree, mounted = true;
   const slots = [], effects = [], requests = [], notices = [], positions = [], listeners = new Map(), frames = [], observers = [];
   let closed = 0, auth = 0, positionsUsed = 0;
@@ -30,12 +30,12 @@ function harness({ signedIn = true, saved = [], save = async () => ({}), anchor 
     stubs: { react, "next/link": "link", "react/jsx-runtime": { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) }, "lucide-react": { BookOpen: "icon", Check: "icon", Plus: "icon", X: "icon" }, "./WordBankProvider": { useWordBank: () => ({ words: saved, ready: true, isSignedIn: signedIn, saveWord: save }) }, "./ReadlayProvider": { useReadlay: () => ({ openAuth: () => auth++, notify: (message) => notices.push(message) }) }, "./PronunciationButton": { PronunciationButton: "pronunciation" }, "@/lib/dictionary-client": { lookupDictionaryInBrowser: (word, signal) => new Promise((resolve, reject) => requests.push({ word, options: { signal }, resolve, reject })) } },
     globals: { Error, ResizeObserver: class { constructor(callback) { this.callback = callback; observers.push(this); } observe(target) { this.target = target; } disconnect() { this.disconnected = true; } }, fetch: (url, options) => new Promise((resolve, reject) => requests.push({ url, options, resolve, reject })), window: { innerWidth: 390, innerHeight: 844, requestAnimationFrame: (fn) => { frames.push(fn); return frames.length; }, cancelAnimationFrame() {}, addEventListener() {}, removeEventListener() {} }, document: { addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: (name) => listeners.delete(name) } },
   }).default;
-  const element = { contains: (target) => target?.inside, getBoundingClientRect: () => ({ height: popupHeight }), focus() {} };
+  const element = { contains: (target) => target?.inside, getBoundingClientRect: () => ({ height: popupHeight }), get scrollHeight() { return popupScrollHeight; }, get offsetHeight() { return popupHeight; }, get clientHeight() { return popupHeight - 2; }, focus() {} };
   function render() { cursor = 0; dirty = false; tree = Popup(props); tree.props.ref.current = element; effects.splice(0).forEach((effect) => effect()); frames.splice(0).forEach((frame) => frame()); if (tree.props.style.visibility === "visible") positions.push(tree.props.style); }
   async function settle() { for (let i = 0; i < 8; i++) { if (dirty && mounted) render(); await new Promise((resolve) => setTimeout(resolve, 1)); } }
   function response(status, body) { if (status >= 200 && status < 300) requests.at(-1).resolve(body); else requests.at(-1).reject(Object.assign(new Error(body.error), { status })); }
   render();
-  return { requests, response, settle, notices, positions, observers, resize(height) { popupHeight = height; observers.findLast((observer) => !observer.disconnected)?.callback(); }, text: () => text(tree), element: (predicate) => find(tree, predicate), button: (label) => find(tree, (node) => node.type === "button" && text(node).includes(label)), style: () => tree.props.style, closed: () => closed, auth: () => auth, positionsUsed: () => positionsUsed, dismiss: (target) => listeners.get("pointerdown")?.({ target }), escape: () => listeners.get("keydown")?.({ key: "Escape", preventDefault() {} }), cleanup() { mounted = false; for (const slot of slots) slot?.cleanup?.(); } };
+  return { requests, response, settle, notices, positions, observers, resize(height, scrollHeight = height - 2) { popupHeight = height; popupScrollHeight = scrollHeight; observers.findLast((observer) => !observer.disconnected)?.callback(); }, text: () => text(tree), element: (predicate) => find(tree, predicate), button: (label) => find(tree, (node) => node.type === "button" && text(node).includes(label)), style: () => tree.props.style, closed: () => closed, auth: () => auth, positionsUsed: () => positionsUsed, dismiss: (target) => listeners.get("pointerdown")?.({ target }), escape: () => listeners.get("keydown")?.({ key: "Escape", preventDefault() {} }), cleanup() { mounted = false; for (const slot of slots) slot?.cleanup?.(); } };
 }
 
 test("popup shows loading, missing and retried definitions, and clamps to a small viewport", async (t) => {
@@ -148,4 +148,21 @@ test("child pronunciation height changes reposition the popup and observers disc
   assert.ok(app.style().top >= 12);
   app.cleanup();
   assert.ok(app.observers.every((observer) => observer.disconnected));
+});
+
+test("content that grows beyond an earlier loading height cap moves above the word without oscillating", async (t) => {
+  const anchor = { left: 50, right: 120, top: 570, bottom: 590, width: 70, height: 20 };
+  const app = harness({ anchor, popupHeight: 120 }); t.after(() => app.cleanup()); await app.settle();
+  assert.equal(app.style().top, 600);
+  assert.equal(app.style().maxHeight, 232);
+  // The visible box is still capped below, while its full content needs 430px.
+  app.resize(232, 428); await app.settle();
+  assert.equal(app.style().top, 130);
+  assert.equal(app.style().maxHeight, 460);
+  const above = { ...app.style() };
+  // ResizeObserver fires again after the new space allows the complete box.
+  app.resize(430, 428); await app.settle();
+  assert.deepEqual({ ...app.style() }, above);
+  app.resize(430, 428); await app.settle();
+  assert.deepEqual({ ...app.style() }, above, "repeated measurements keep the same placement");
 });
