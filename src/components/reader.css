@@ -141,6 +141,7 @@
 .reader-audio-status svg{flex:none}
 .reader-audio-error{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-top:9px;font-size:11px;line-height:1.6;color:var(--reader-text)}
 .reader-audio-error p{margin:0}
+.reader-position-marker{min-width:24px}
 .reader-audio-error button{min-height:44px;padding:8px 0;flex:none;color:var(--reader-ink);font-size:11px;background:transparent;border:0;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
 .reader-is-listening .reader-passage.is-current{background:var(--reader-line);box-shadow:9px 0 var(--reader-line),-9px 0 var(--reader-line);border-radius:2px}
 @media(max-width:900px){.reader-audio,.reader-edition-warning{margin-left:54px}.reader-audio{margin-top:-20px}}

@@ -79,6 +79,21 @@ export default function AudiobookPlayer({ bookId, editionId, bookTitle, author, 
     return next;
   }, []);
 
+  const reportSeek = useCallback(() => {
+    const element = audio.current;
+    if (!element) return;
+    setTime(element.currentTime);
+    if (element.currentTime < element.duration) setMessage("");
+    reportTime();
+  }, [reportTime]);
+
+  const seek = useCallback((seconds: number) => {
+    const element = audio.current;
+    if (!element || !Number.isFinite(seconds) || !Number.isFinite(element.duration) || pendingSeek.current) return;
+    element.currentTime = Math.max(0, Math.min(element.duration, seconds));
+    reportSeek();
+  }, [reportSeek]);
+
   const queuePosition = useCallback((nextManifest: AudioManifest, position: AudioPosition, autoplay: boolean, reload = false) => {
     audio.current?.pause();
     const start = seekTimeForParagraph(nextManifest, position);
@@ -210,9 +225,9 @@ export default function AudiobookPlayer({ bookId, editionId, bookTitle, author, 
         else void audio.current?.play().catch(() => setMessage("Press play to start the audio."));
       },
       pause: () => { audio.current?.pause(); reportTime(); },
-      seekbackward: ({ seekOffset }) => { if (audio.current) { audio.current.currentTime = Math.max(0, audio.current.currentTime - (seekOffset ?? 15)); reportTime(); } },
-      seekforward: ({ seekOffset }) => { if (audio.current && Number.isFinite(audio.current.duration)) { audio.current.currentTime = Math.min(audio.current.duration, audio.current.currentTime + (seekOffset ?? 15)); reportTime(); } },
-      seekto: ({ seekTime }) => { if (audio.current && typeof seekTime === "number" && Number.isFinite(seekTime) && Number.isFinite(audio.current.duration)) { audio.current.currentTime = Math.max(0, Math.min(audio.current.duration, seekTime)); reportTime(); } },
+      seekbackward: ({ seekOffset }) => { if (audio.current) seek(audio.current.currentTime - (seekOffset ?? 15)); },
+      seekforward: ({ seekOffset }) => { if (audio.current) seek(audio.current.currentTime + (seekOffset ?? 15)); },
+      seekto: ({ seekTime }) => { if (typeof seekTime === "number") seek(seekTime); },
     };
     const registered: MediaSessionAction[] = [];
     for (const [action, handler] of Object.entries(handlers)) {
@@ -222,7 +237,7 @@ export default function AudiobookPlayer({ bookId, editionId, bookTitle, author, 
       for (const action of registered) mediaSession.setActionHandler(action, null);
       mediaSession.metadata = null;
     };
-  }, [target, bookTitle, author, reportTime, queuePosition]);
+  }, [target, bookTitle, author, reportTime, queuePosition, seek]);
 
   function savePreferences(nextNarrator: string, nextRate: number) {
     try { localStorage.setItem(preferenceKey, JSON.stringify({ narratorId: nextNarrator, rate: nextRate })); } catch { /* This session still keeps the selection. */ }
@@ -267,14 +282,6 @@ export default function AudiobookPlayer({ bookId, editionId, bookTitle, author, 
     if (element.ended) { listenFromHere(); return; }
     setMessage("");
     void element.play().catch(() => setMessage("Press play again to start the audio."));
-  }
-
-  function seek(seconds: number) {
-    const element = audio.current;
-    if (!element || !Number.isFinite(element.duration) || pendingSeek.current) return;
-    element.currentTime = Math.max(0, Math.min(element.duration, seconds));
-    setTime(element.currentTime);
-    reportTime();
   }
 
   function ended() {
@@ -329,7 +336,7 @@ export default function AudiobookPlayer({ bookId, editionId, bookTitle, author, 
       onPause={() => { setPlaying(false); reportTime(); }}
       onWaiting={() => setWaiting(true)}
       onTimeUpdate={() => { if (audio.current && !pendingSeek.current) { setTime(audio.current.currentTime); reportTime(); } }}
-      onSeeked={() => { if (audio.current) setTime(audio.current.currentTime); reportTime(); }}
+      onSeeked={reportSeek}
       onDurationChange={() => { if (audio.current && Number.isFinite(audio.current.duration)) setDuration(audio.current.duration); }}
       onEnded={ended}
       onError={() => { if (!activeTarget.current) return; pendingSeek.current = null; setWaiting(false); setPlaying(false); setError("Audio could not be loaded. Check your connection and retry."); }} />
