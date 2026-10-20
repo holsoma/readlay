@@ -1,9 +1,11 @@
 import "server-only";
+import { Buffer } from "node:buffer";
 import { neon } from "@neondatabase/serverless";
 import { books } from "@/data/books";
 import { getBookContent } from "@/lib/book-content";
 import { DictionaryError, getDictionaryLookup } from "@/lib/dictionary";
-import { normaliseDictionaryWord } from "@/lib/dictionary-word";
+import { inflectionCandidates, normaliseDictionaryWord } from "@/lib/dictionary-word";
+import { parseDictionaryEntry, type DictionaryEntry } from "@/lib/dictionary-types";
 import { cfiForPosition, cfiForRange, isTextBoundary, wordsInText } from "@/lib/epub-location";
 import { isWordStatus, parseWordBank, type SavedWord, type SaveWordInput, type WordBankAction, type WordBankRequest } from "@/lib/wordbank-types";
 
@@ -24,6 +26,14 @@ const record = (value: unknown): value is Record<string, unknown> => !!value && 
 const coordinate = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 0 && Number(value) <= 2_147_483_647;
 const id = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
+function dictionarySnapshot(value: unknown, query: string): DictionaryEntry {
+  const encoded = JSON.stringify(value);
+  if (!encoded || Buffer.byteLength(encoded, "utf8") > 480 * 1024) throw new WordBankError(400, "The dictionary entry is too large.");
+  const entry = parseDictionaryEntry(value);
+  if (!entry || !inflectionCandidates(query).includes(entry.word)) throw new WordBankError(400, "The dictionary entry does not match the selected word.");
+  return entry;
+}
+
 export function parseWordBankAction(value: unknown): WordBankRequest {
   if (!record(value) || typeof value.expectedUserId !== "string" || !value.expectedUserId || value.expectedUserId.length > 128) {
     throw new WordBankError(400, "Invalid Word Bank action.");
@@ -43,6 +53,7 @@ export function parseWordBankAction(value: unknown): WordBankRequest {
   return {
     ...shared, action: "save", word: value.word, bookId: value.bookId, editionId: value.editionId,
     chapterIndex: value.chapterIndex, paragraphIndex: value.paragraphIndex, charStart: value.charStart, charEnd: value.charEnd,
+    ...(value.entry === undefined ? {} : { entry: dictionarySnapshot(value.entry, value.word) }),
   };
 }
 
@@ -110,20 +121,26 @@ export async function getWordBank(userId: string): Promise<SavedWord[]> {
 export async function applyWordBankAction(userId: string, action: WordBankAction): Promise<void> {
   if (action.action === "save") {
     const source = await sourceForWord(action);
-    let lookup;
-    try { lookup = await getDictionaryLookup(action.word); }
-    catch (error) {
-      if (error instanceof DictionaryError) throw new WordBankError(error.status, error.message);
-      throw error;
+    let entry: DictionaryEntry;
+    if (action.entry !== undefined) {
+      // This snapshot belongs only to the signed-in user's vocabulary. All source locations
+      // still come from the server edition; no supplied definition is published to others.
+      entry = dictionarySnapshot(action.entry, action.word);
+    } else {
+      try { entry = (await getDictionaryLookup(action.word)).entry; }
+      catch (error) {
+        if (error instanceof DictionaryError) throw new WordBankError(error.status, error.message);
+        throw error;
+      }
     }
-    const word = normaliseDictionaryWord(lookup.entry.word);
-    if (!word || word !== lookup.entry.word) throw new WordBankError(502, "This dictionary entry could not be saved.");
+    const word = normaliseDictionaryWord(entry.word);
+    if (!word || word !== entry.word) throw new WordBankError(502, "This dictionary entry could not be saved.");
     const sql = database();
     // One statement keeps the headword and its occurrence atomic under concurrent saves.
     // The conflict key preserves an existing learning status and the original save date.
     await sql`WITH saved_word AS (
         INSERT INTO readlay_words (id, user_id, word, entry)
-        VALUES (${crypto.randomUUID()}, ${userId}, ${word}, ${JSON.stringify(lookup.entry)}::jsonb)
+        VALUES (${crypto.randomUUID()}, ${userId}, ${word}, ${JSON.stringify(entry)}::jsonb)
         ON CONFLICT (user_id, word) DO UPDATE SET entry = EXCLUDED.entry, updated_at = CURRENT_TIMESTAMP
         RETURNING id
       )

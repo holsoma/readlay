@@ -15,6 +15,7 @@ const sample = (word = "hello") => [{
   sourceUrls: [`https://en.wiktionary.org/wiki/${word}`],
 }];
 const response = (body, status = 200, headers = {}) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...headers } });
+const missingResponse = () => response({ title: "No Definitions Found", message: "No definition is available." }, 404);
 
 function service(fetcher, overrides = {}) {
   let clock = 1000;
@@ -81,14 +82,14 @@ test("exact inflections win, fallback runs only after 404, and missing results h
   const exact = service(async () => response(sample("running")));
   assert.equal((await exact.getDictionaryLookup("running")).entry.word, "running");
   assert.equal(exact.calls.length, 1);
-  const fallback = service(async (url) => url.endsWith("children") ? response({}, 404) : response(sample("child")));
+  const fallback = service(async (url) => url.endsWith("children") ? missingResponse() : response(sample("child")));
   const result = await fallback.getDictionaryLookup("children");
   assert.equal(result.query, "children");
   assert.equal(result.entry.word, "child");
   assert.equal(fallback.calls.length, 2);
   await fallback.getDictionaryLookup("children");
   assert.equal(fallback.calls.length, 2);
-  const missing = service(async () => response({}, 404));
+  const missing = service(async () => missingResponse());
   await assert.rejects(missing.getDictionaryLookup("quizzacious"), (error) => error.status === 404);
   await assert.rejects(missing.getDictionaryLookup("quizzacious"), (error) => error.status === 404);
   assert.equal(missing.calls.length, 1);
@@ -104,7 +105,7 @@ test("concurrent lookups share one request, including while inflection fallback 
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
   const dictionary = service(async (url) => {
-    if (url.endsWith("children")) return response({}, 404);
+    if (url.endsWith("children")) return missingResponse();
     await gate;
     return response(sample("child"));
   });
@@ -172,6 +173,27 @@ test("timeouts stop the request and do not try alternative words", async () => {
   }, { setTimeout: (callback) => { callback(); return 0; }, clearTimeout: () => {} });
   await assert.rejects(dictionary.getDictionaryLookup("children"), (error) => error.status === 503);
   assert.equal(dictionary.calls.length, 1);
+});
+
+test("HTML 404 pages are unavailable responses, not cached missing dictionary entries", async () => {
+  const dictionary = service(async (_url, _options, count) => count === 1
+    ? new Response("<html>Page unavailable</html>", { status: 404, headers: { "Content-Type": "text/html" } })
+    : response(sample("school")));
+  await assert.rejects(dictionary.getDictionaryLookup("school"), (error) => error.status === 502);
+  assert.equal((await dictionary.getDictionaryLookup("school")).entry.word, "school");
+  assert.equal(dictionary.calls.length, 2);
+});
+
+test("failure diagnostics are bounded fixed metadata and never expose words or error messages", async () => {
+  const logs = [];
+  const dictionary = service(async () => { throw Object.assign(new TypeError("PRIVATE_ERROR_MESSAGE"), { cause: { code: "ENOTFOUND", secret: "PRIVATE_SECRET" } }); }, { console: { warn: (...args) => logs.push(args) } });
+  for (let index = 0; index < 3; index++) await assert.rejects(dictionary.getDictionaryLookup("confidential"), (error) => error.status === 503);
+  assert.equal(logs.length, 1, "repeated failures are logged once per minute for this fixed category");
+  assert.deepEqual(plain(logs[0][1]), { stage: "transport", status: null, errorName: "TypeError", causeCode: "ENOTFOUND" });
+  assert.doesNotMatch(JSON.stringify(logs), /confidential|PRIVATE_|https?:/);
+  dictionary.advance(60_001);
+  await assert.rejects(dictionary.getDictionaryLookup("confidential"), (error) => error.status === 503);
+  assert.equal(logs.length, 2);
 });
 
 test("dictionary API requires the current GitHub session and returns private responses", async () => {

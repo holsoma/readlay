@@ -26,7 +26,11 @@ export type SavedWord = {
   updatedAt: string;
   occurrences: WordOccurrence[];
 };
-export type SaveWordInput = Pick<WordOccurrence, "bookId" | "editionId" | "chapterIndex" | "paragraphIndex" | "charStart" | "charEnd"> & { word: string };
+export type SaveWordInput = Pick<WordOccurrence, "bookId" | "editionId" | "chapterIndex" | "paragraphIndex" | "charStart" | "charEnd"> & {
+  word: string;
+  // A browser lookup can supply the displayed entry when the API blocks hosting providers.
+  entry?: DictionaryEntry;
+};
 export type WordBankAction =
   | ({ action: "save" } & SaveWordInput)
   | { action: "remove"; id: string }

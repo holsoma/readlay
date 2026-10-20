@@ -27,21 +27,21 @@ function harness({ signedIn = true, saved = [], save = async () => ({}), anchor 
   const selection = { word, selectedText: word, chapterIndex: 0, paragraphIndex: 2, charStart: 12, charEnd: 17, anchor };
   const props = { selection, bookId: "book", editionId: "edition", getAnchor: () => selection.anchor, onClose: () => closed++, onUsePosition: () => positionsUsed++ };
   const Popup = loadTypeScript("src/components/DictionaryPopup.tsx", {
-    stubs: { react, "next/link": "link", "react/jsx-runtime": { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) }, "lucide-react": { BookOpen: "icon", Check: "icon", Plus: "icon", X: "icon" }, "./WordBankProvider": { useWordBank: () => ({ words: saved, ready: true, isSignedIn: signedIn, saveWord: save }) }, "./ReadlayProvider": { useReadlay: () => ({ openAuth: () => auth++, notify: (message) => notices.push(message) }) }, "./PronunciationButton": { PronunciationButton: "pronunciation" } },
+    stubs: { react, "next/link": "link", "react/jsx-runtime": { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) }, "lucide-react": { BookOpen: "icon", Check: "icon", Plus: "icon", X: "icon" }, "./WordBankProvider": { useWordBank: () => ({ words: saved, ready: true, isSignedIn: signedIn, saveWord: save }) }, "./ReadlayProvider": { useReadlay: () => ({ openAuth: () => auth++, notify: (message) => notices.push(message) }) }, "./PronunciationButton": { PronunciationButton: "pronunciation" }, "@/lib/dictionary-client": { lookupDictionaryInBrowser: (word, signal) => new Promise((resolve, reject) => requests.push({ word, options: { signal }, resolve, reject })) } },
     globals: { Error, fetch: (url, options) => new Promise((resolve, reject) => requests.push({ url, options, resolve, reject })), window: { innerWidth: 390, innerHeight: 844, requestAnimationFrame: (fn) => { frames.push(fn); return frames.length; }, cancelAnimationFrame() {}, addEventListener() {}, removeEventListener() {} }, document: { addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: (name) => listeners.delete(name) } },
   }).default;
   const element = { contains: (target) => target?.inside, getBoundingClientRect: () => ({ height: popupHeight }), focus() {} };
   function render() { cursor = 0; dirty = false; tree = Popup(props); tree.props.ref.current = element; effects.splice(0).forEach((effect) => effect()); frames.splice(0).forEach((frame) => frame()); if (tree.props.style.visibility === "visible") positions.push(tree.props.style); }
   async function settle() { for (let i = 0; i < 8; i++) { if (dirty && mounted) render(); await new Promise((resolve) => setTimeout(resolve, 1)); } }
-  function response(status, body) { requests.at(-1).resolve({ ok: status >= 200 && status < 300, status, json: async () => body }); }
+  function response(status, body) { if (status >= 200 && status < 300) requests.at(-1).resolve(body); else requests.at(-1).reject(Object.assign(new Error(body.error), { status })); }
   render();
-  return { requests, response, settle, notices, positions, text: () => text(tree), button: (label) => find(tree, (node) => node.type === "button" && text(node).includes(label)), style: () => tree.props.style, closed: () => closed, auth: () => auth, positionsUsed: () => positionsUsed, dismiss: (target) => listeners.get("pointerdown")?.({ target }), escape: () => listeners.get("keydown")?.({ key: "Escape", preventDefault() {} }), cleanup() { mounted = false; for (const slot of slots) slot?.cleanup?.(); } };
+  return { requests, response, settle, notices, positions, text: () => text(tree), element: (predicate) => find(tree, predicate), button: (label) => find(tree, (node) => node.type === "button" && text(node).includes(label)), style: () => tree.props.style, closed: () => closed, auth: () => auth, positionsUsed: () => positionsUsed, dismiss: (target) => listeners.get("pointerdown")?.({ target }), escape: () => listeners.get("keydown")?.({ key: "Escape", preventDefault() {} }), cleanup() { mounted = false; for (const slot of slots) slot?.cleanup?.(); } };
 }
 
 test("popup shows loading, missing and retried definitions, and clamps to a small viewport", async (t) => {
   const app = harness(); t.after(() => app.cleanup()); await app.settle();
   assert.ok(app.text().includes("Looking up this word"));
-  assert.equal(app.requests[0].url, "/api/dictionary?word=habit");
+  assert.equal(app.requests[0].word, "habit");
   assert.ok(app.style().left >= 12 && app.style().left + app.style().width <= 378);
   assert.ok(app.style().top >= 12 && app.style().top <= 502);
   app.response(404, { error: "No definition found." }); await app.settle();
@@ -54,13 +54,13 @@ test("popup shows loading, missing and retried definitions, and clamps to a smal
   assert.ok(app.text().includes("Pronunciation audio is unavailable"));
 });
 
-test("saving sends only source coordinates, reports failures and allows a retry", async (t) => {
+test("saving sends source coordinates and the displayed dictionary snapshot, reports failures and allows a retry", async (t) => {
   const inputs = [];
   const app = harness({ save: async (input) => { inputs.push(input); if (inputs.length === 1) throw new Error("Could not save this word."); return {}; } }); t.after(() => app.cleanup());
   app.response(200, { query: "habit", entry }); await app.settle();
   app.button("Save to Word Bank").props.onClick(); await app.settle();
   assert.ok(app.text().includes("Could not save this word."));
-  assert.deepEqual(JSON.parse(JSON.stringify(inputs[0])), { word: "habit", bookId: "book", editionId: "edition", chapterIndex: 0, paragraphIndex: 2, charStart: 12, charEnd: 17 });
+  assert.deepEqual(JSON.parse(JSON.stringify(inputs[0])), { word: "habit", bookId: "book", editionId: "edition", chapterIndex: 0, paragraphIndex: 2, charStart: 12, charEnd: 17, entry });
   app.button("Save to Word Bank").props.onClick(); await app.settle();
   assert.equal(app.notices.length, 1);
 });
@@ -80,7 +80,7 @@ test("closing cancels a pending dictionary request and signed-out saves use exis
   const request = closed.requests[0];
   closed.cleanup();
   assert.equal(request.options.signal.aborted, true);
-  request.resolve({ ok: true, json: async () => ({ query: "habit", entry }) });
+  request.resolve({ query: "habit", entry });
   await closed.settle();
   const guest = harness({ signedIn: false });
   guest.response(200, { query: "habit", entry }); await guest.settle();
@@ -107,4 +107,22 @@ test("non-dictionary source tokens never call the API and keep the explicit posi
     app.button("Set reading place").props.onClick();
     assert.equal(app.positionsUsed(), 1);
   }
+});
+
+test("one concise primary definition keeps actions ahead of native More meanings with complete alternatives", async (t) => {
+  const app = harness(); t.after(() => app.cleanup());
+  const full = "An action repeated regularly with a longer explanation. ".repeat(8);
+  const rich = { ...entry, meanings: [{ partOfSpeech: "noun", definitions: [{ definition: full }, { definition: "A customary practice." }] }, { partOfSpeech: "verb", definitions: [{ definition: "To become accustomed to something." }] }] };
+  app.response(200, { query: "habit", entry: rich }); await app.settle();
+  const primary = app.element((node) => node.props?.className === "reader-dictionary-meanings reader-dictionary-primary");
+  assert.ok(text(primary).length < 190);
+  assert.ok(!text(primary).includes("customary"));
+  const details = app.element((node) => node.type === "details");
+  assert.ok(!details.props.open, "native details starts collapsed");
+  assert.equal(text(app.element((node) => node.type === "summary")), "More meanings");
+  assert.ok(text(details).includes(full), "the unabridged primary definition remains available");
+  assert.ok(text(details).includes("A customary practice."));
+  assert.ok(text(details).includes("To become accustomed to something."));
+  assert.ok(app.text().indexOf("Save to Word Bank") < app.text().indexOf("More meanings"));
+  assert.ok(app.text().indexOf("Set reading place") < app.text().indexOf("More meanings"));
 });

@@ -1,14 +1,12 @@
 import "server-only";
-import type { DictionaryEntry, DictionaryLicence, DictionaryLookup, DictionaryMeaning } from "./dictionary-types";
-import { inflectionCandidates, normaliseDictionaryWord, safePronunciationUrl } from "./dictionary-word";
+import { DictionaryError, parseDictionaryProviderEntry, readDictionaryJson } from "./dictionary-response";
+import type { DictionaryEntry, DictionaryLookup } from "./dictionary-types";
+import { inflectionCandidates, normaliseDictionaryWord } from "./dictionary-word";
 
-export class DictionaryError extends Error {
-  constructor(public readonly status: 400 | 404 | 429 | 502 | 503, message: string) { super(message); this.name = "DictionaryError"; }
-}
+export { DictionaryError };
 
 const maximumCacheEntries = 256;
 const maximumInFlight = 32;
-const maximumResponseBytes = 512 * 1024;
 const positiveLifetime = 24 * 60 * 60 * 1000;
 const negativeLifetime = 5 * 60 * 1000;
 type CacheEntry = { expires: number; entry: DictionaryEntry | null };
@@ -17,6 +15,27 @@ const pending = new Map<string, Promise<DictionaryEntry | null>>();
 const remotePending = new Map<string, Promise<DictionaryEntry | null>>();
 const unavailable = () => new DictionaryError(503, "The dictionary is unavailable. Try again shortly.");
 const invalidResponse = () => new DictionaryError(502, "The dictionary returned an unreadable response. Try again.");
+const warnings = new Map<string, number>();
+const safeErrorNames = new Set(["AbortError", "TimeoutError", "TypeError", "SyntaxError", "Error"]);
+const safeCauseCodes = new Set(["ABORT_ERR", "ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "UND_ERR_SOCKET", "ERR_TLS_CERT_ALTNAME_INVALID", "CERT_HAS_EXPIRED", "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "SELF_SIGNED_CERT_IN_CHAIN"]);
+
+function warn(stage: "upstream-status" | "transport" | "invalid-response", status: number | null, error?: unknown): void {
+  let errorName: string | null = null;
+  let causeCode: string | null = null;
+  try {
+    const failure = record(error);
+    const cause = failure && record(failure.cause);
+    if (failure) errorName = typeof failure.name === "string" && safeErrorNames.has(failure.name) ? failure.name : "Other";
+    if (cause?.code) causeCode = typeof cause.code === "string" && safeCauseCodes.has(cause.code) ? cause.code : "Other";
+  } catch { errorName = "Other"; }
+  const key = `${stage}:${status}:${errorName}:${causeCode}`;
+  const previous = warnings.get(key);
+  if (previous !== undefined && Date.now() - previous < 60_000) return;
+  warnings.set(key, Date.now());
+  while (warnings.size > 16) warnings.delete(warnings.keys().next().value!);
+  // Fixed labels only. Never log a word, URL, book text, session, headers or an error message.
+  console.warn("Readlay dictionary request failed.", { stage, status, errorName, causeCode });
+}
 
 function cached(word: string): DictionaryEntry | null | undefined {
   const value = cache.get(word);
@@ -37,106 +56,6 @@ function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
-function text(value: unknown, maxLength: number): string | null {
-  if (typeof value !== "string" || value.length > maxLength) return null;
-  const cleaned = value.replace(/<[^>]*>/g, "").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").trim();
-  return cleaned || null;
-}
-
-function sourceUrl(value: unknown): string | null {
-  if (typeof value !== "string" || value.length > 2048) return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && !url.username && !url.password && !url.port ? url.href : null;
-  } catch { return null; }
-}
-
-function licence(value: unknown): DictionaryLicence | null {
-  const data = record(value);
-  const name = data && text(data.name, 100);
-  const url = data && sourceUrl(data.url);
-  return name && url ? { name, url } : null;
-}
-
-function parseEntry(value: unknown, requestedWord: string): DictionaryEntry {
-  if (!Array.isArray(value) || !value.length) throw invalidResponse();
-  const entries = value.slice(0, 6).map(record).filter((item): item is Record<string, unknown> => item !== null);
-  // Homographs can be returned as separate entries. Keep their meanings together.
-  const relevant = entries.filter((entry) => normaliseDictionaryWord(entry.word) === requestedWord);
-  if (!relevant.length) throw invalidResponse();
-  const meanings: DictionaryMeaning[] = [];
-  let phonetic: string | null = null;
-  let audioUrl: string | null = null;
-  let pronunciationSourceUrl: string | null = null;
-  let pronunciationLicence: DictionaryLicence | null = null;
-  for (const entry of relevant) {
-    const phonetics = Array.isArray(entry.phonetics) ? entry.phonetics.slice(0, 12).map(record).filter((item): item is Record<string, unknown> => item !== null) : [];
-    const playable = phonetics.filter((item) => safePronunciationUrl(item.audio));
-    const spoken = playable.find((item) => /(?:-uk|--_gb_)/i.test(String(item.audio))) || playable[0];
-    if (!audioUrl && spoken) {
-      audioUrl = safePronunciationUrl(spoken.audio);
-      pronunciationSourceUrl = sourceUrl(spoken.sourceUrl);
-      pronunciationLicence = licence(spoken.license);
-      phonetic = text(spoken.text, 200);
-    }
-    phonetic ||= text(entry.phonetic, 200) || phonetics.map((item) => text(item.text, 200)).find(Boolean) || null;
-    for (const meaningValue of Array.isArray(entry.meanings) ? entry.meanings.slice(0, 12) : []) {
-      const meaning = record(meaningValue);
-      const partOfSpeech = meaning && text(meaning.partOfSpeech, 60);
-      if (!meaning || !partOfSpeech || !Array.isArray(meaning.definitions)) continue;
-      const definitions: DictionaryMeaning["definitions"] = [];
-      for (const definitionValue of meaning.definitions.slice(0, 8)) {
-        const data = record(definitionValue);
-        const definition = data && text(data.definition, 2000);
-        if (!definition || definitions.some((item) => item.definition === definition)) continue;
-        const example = text(data!.example, 1500);
-        definitions.push(example ? { definition, example } : { definition });
-      }
-      if (definitions.length) meanings.push({ partOfSpeech, definitions });
-      if (meanings.length >= 12) break;
-    }
-    if (meanings.length >= 12) break;
-  }
-  if (!meanings.length) throw invalidResponse();
-  const first = relevant[0];
-  return {
-    word: requestedWord, phonetic, audioUrl, meanings,
-    sourceUrl: Array.isArray(first.sourceUrls) ? first.sourceUrls.map(sourceUrl).find(Boolean) || null : null,
-    licence: licence(first.license), pronunciationSourceUrl, pronunciationLicence,
-  };
-}
-
-async function readJson(response: Response): Promise<unknown> {
-  const declared = response.headers.get("content-length");
-  if (declared && (!/^\d+$/.test(declared) || Number(declared) > maximumResponseBytes)) {
-    await response.body?.cancel();
-    throw invalidResponse();
-  }
-  if (!/^application\/json(?:;|$)/i.test(response.headers.get("content-type") || "") || !response.body) {
-    await response.body?.cancel();
-    throw invalidResponse();
-  }
-  const reader = response.body.getReader();
-  let bytes = 0;
-  const chunks: Uint8Array[] = [];
-  try {
-    while (true) {
-      const result = await reader.read();
-      if (result.done) break;
-      bytes += result.value.byteLength;
-      if (bytes > maximumResponseBytes) { await reader.cancel(); throw invalidResponse(); }
-      chunks.push(result.value);
-    }
-    const body = new Uint8Array(bytes);
-    let offset = 0;
-    for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
-  } catch (error) {
-    if (error instanceof DictionaryError) throw error;
-    throw invalidResponse();
-  } finally { reader.releaseLock(); }
-}
-
 async function fetchEntry(word: string, deadline: number): Promise<DictionaryEntry | null> {
   const cachedEntry = cached(word);
   if (cachedEntry !== undefined) return cachedEntry;
@@ -148,18 +67,27 @@ async function fetchEntry(word: string, deadline: number): Promise<DictionaryEnt
     const remaining = Math.min(6000, deadline - Date.now());
     if (remaining <= 0) throw unavailable();
     const timeout = setTimeout(() => controller.abort(), remaining);
+    let upstreamStatus: number | null = null;
     try {
       const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`, {
         signal: controller.signal, redirect: "error", headers: { Accept: "application/json" }, next: { revalidate: positiveLifetime / 1000 },
       });
-      if (response.status === 404) { await response.body?.cancel(); remember(word, null); return null; }
+      upstreamStatus = response.status;
+      if (!response.ok) warn("upstream-status", response.status);
+      if (response.status === 404) {
+        const missing = record(await readDictionaryJson(response));
+        if (typeof missing?.title !== "string" || typeof missing.message !== "string") throw invalidResponse();
+        remember(word, null);
+        return null;
+      }
       if (response.status === 429) { await response.body?.cancel(); throw new DictionaryError(429, "The dictionary is busy. Wait a moment, then try again."); }
       if (!response.ok) { await response.body?.cancel(); throw unavailable(); }
-      const entry = parseEntry(await readJson(response), word);
+      const entry = parseDictionaryProviderEntry(await readDictionaryJson(response), word);
       remember(word, entry);
       return entry;
     } catch (error) {
-      if (error instanceof DictionaryError) throw error;
+      if (error instanceof DictionaryError) { if (error.status === 502) warn("invalid-response", upstreamStatus); throw error; }
+      warn("transport", upstreamStatus, error);
       throw unavailable();
     } finally { clearTimeout(timeout); }
   })();

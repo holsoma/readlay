@@ -64,7 +64,7 @@ Kokoro has no per-character API fee. Local generation uses the preparation compu
 
 ## Dictionary and vocabulary
 
-Dictionary lookup uses the free [Dictionary API](https://dictionaryapi.dev/) and needs no API key or paid AI service. The normal server must reach `api.dictionaryapi.dev`; pronunciation plays from the API's validated media URL, with its source and licence shown. Some entries have no audio or phonetic transcription. Missing entries and service failures are shown in the popup with retry controls.
+Dictionary lookup uses the free [Dictionary API](https://dictionaryapi.dev/) and needs no API key or paid AI service. The reader calls its public CORS API directly from the browser with credentials and referrers omitted, then caches validated results. This avoids the provider's rejection of requests from the deployed server. Pronunciation plays from the API's validated media URL, with source and licence attribution. Some entries have no audio or phonetic transcription. Missing entries and service failures are shown in the popup with retry controls. The compatibility `/api/dictionary` route and save requests without a displayed snapshot still require upstream server access, and can return a service error where the provider blocks hosting networks.
 
 The Word Bank uses the existing GitHub identity and Neon connection. The normal migration command now also runs `003_word_bank.sql`; no new database or authentication provider is required. The Vercel build applies it before serving the feature. The word-saving route needs the same private `.local/books/*.json` server files as the reader, included through `outputFileTracingIncludes` for `/api/word-bank`. These files must remain outside `public` and Git.
 

@@ -3,7 +3,7 @@ import { applyWordBankAction, getWordBank, parseWordBankAction, WordBankError } 
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-const maximumBodyBytes = 4 * 1024;
+const maximumBodyBytes = 512 * 1024;
 const privateHeaders = { "Cache-Control": "private, no-store, max-age=0", Vary: "Cookie", "X-Content-Type-Options": "nosniff" };
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: privateHeaders });
 

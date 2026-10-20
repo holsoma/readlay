@@ -120,8 +120,10 @@ test("Word Bank isolates account state and does not persist guest vocabulary or 
 test("save, status and remove immediately adopt the authoritative snapshot and publish only invalidation markers", async (t) => {
   const app = harness(); t.after(() => app.cleanup());
   const tab = app.mount(); await settle();
-  const saved = await tab.render().saveWord(source);
+  const saved = await tab.render().saveWord({ ...source, entry });
   assert.equal(saved.word, "habit");
+  const sent = JSON.parse(app.calls.find((call) => call.options.method === "POST").options.body);
+  assert.equal(sent.entry.meanings[0].definitions[0].definition, entry.meanings[0].definitions[0].definition);
   assert.equal(tab.render().words.length, 1);
   await tab.render().setWordStatus(saved.id, "learning");
   assert.equal(tab.render().words[0].status, "learning");

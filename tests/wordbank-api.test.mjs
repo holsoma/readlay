@@ -68,9 +68,9 @@ test("source context and canonical CFI range are derived from exact complete lex
   assert.equal(queries.length, 0, "invalid source locations must never access the database");
 });
 
-test("save uses a trusted dictionary snapshot and one atomic upsert without changing reading progress", async () => {
+test("save without a browser snapshot uses the server lookup and an atomic upsert without changing reading progress", async () => {
   const app = harness();
-  await app.store.applyWordBankAction("A", { ...input, action: "save", sentence: "injected client sentence", entry: { definition: "injected" } });
+  await app.store.applyWordBankAction("A", { ...input, action: "save", sentence: "injected client sentence" });
   assert.equal(app.queries.length, 1);
   const query = app.queries[0];
   assert.match(query.text, /WITH saved_word AS/);
@@ -85,6 +85,40 @@ test("save uses a trusted dictionary snapshot and one atomic upsert without chan
   app.setLookupError(new app.DictionaryError(404, "No definition found."));
   await assert.rejects(app.store.applyWordBankAction("A", { ...input, action: "save" }), errorIs(404));
   assert.equal(app.queries.length, 1, "failed lookups must not leave an empty saved word");
+});
+
+test("validated browser snapshots bypass blocked server lookups while keeping exact source and safe pronunciation URLs", async () => {
+  const app = harness();
+  app.setLookupError(new app.DictionaryError(503, "Provider blocked this server."));
+  const parsed = app.store.parseWordBankAction({ ...action, word: "habits", paragraphIndex: 1, charStart: 12, charEnd: 18,
+    sentence: "Do not trust client context", cfiRange: "forged", entry: { ...entry, audioUrl: "https://attacker.test/track.mp3" } });
+  assert.equal(parsed.entry.word, "habit", "a real inflection can resolve to its base headword");
+  assert.equal(parsed.entry.audioUrl, null, "unapproved pronunciation origins must not be stored");
+  await app.store.applyWordBankAction("A", parsed);
+  assert.equal(app.queries.length, 1);
+  const query = app.queries[0];
+  assert.ok(query.values.includes("😀 We build habits."));
+  assert.ok(query.values.includes("habits"));
+  assert.ok(query.values.includes(locations.cfiForRange(0, 1, 12, 18)));
+  assert.ok(!query.values.includes("forged"));
+  const snapshot = JSON.parse(query.values.find((value) => typeof value === "string" && value.startsWith('{"word"')));
+  assert.equal(snapshot.word, "habit");
+  assert.equal(snapshot.audioUrl, null);
+  assert.equal(snapshot.licence.name, entry.licence.name);
+  await assert.rejects(app.store.applyWordBankAction("A", { ...input, action: "save", word: "grows", entry }), errorIs(400));
+  assert.equal(app.queries.length, 1, "a browser entry cannot override the source word validation");
+});
+
+test("snapshot input rejects unrelated headwords, malformed definitions and oversized bodies", () => {
+  const { store } = harness();
+  for (const snapshot of [null, {}, { ...entry, word: "power" }, { ...entry, meanings: [] },
+    { ...entry, meanings: [{ partOfSpeech: "noun", definitions: [{ definition: "<script>alert(1)</script>" }] }] },
+    { ...entry, meanings: [{ partOfSpeech: "noun", definitions: [{ definition: "x".repeat(2001) }] }] },
+    { ...entry, extra: "x".repeat(480 * 1024) },
+  ]) assert.throws(() => store.parseWordBankAction({ ...action, entry: snapshot }), errorIs(400));
+  const safe = store.parseWordBankAction({ ...action, entry: { ...entry, sourceUrl: "javascript:alert(1)", pronunciationSourceUrl: "data:text/html,bad" } });
+  assert.equal(safe.entry.sourceUrl, null);
+  assert.equal(safe.entry.pronunciationSourceUrl, null);
 });
 
 test("Word Bank reads all occurrences and scopes every read/write to the authenticated user", async () => {
@@ -127,7 +161,7 @@ test("Word Bank API enforces authentication, account guards, same origin, no-sto
   }));
   assert.equal((await post({ ...action, expectedUserId: "B" })).status, 401);
   assert.equal((await post(action, "https://evil.test")).status, 400);
-  assert.equal((await post(" ".repeat(4097))).status, 400);
+  assert.equal((await post(" ".repeat(512 * 1024 + 1))).status, 400);
   assert.equal((await post("not json")).status, 400);
   assert.equal((await post(action, "https://readlay.test", "text/plain")).status, 400);
   assert.equal((await api.GET(new Request("https://readlay.test/api/word-bank?expectedUserId=B"))).status, 401);
