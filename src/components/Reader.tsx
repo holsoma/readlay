@@ -1,13 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, Bookmark, BookmarkCheck, Check, ChevronLeft, List, Minus, Plus, Type, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, Bookmark, BookmarkCheck, Check, ChevronLeft, List, Minus, Plus, Type, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type KeyboardEvent } from "react";
 import type { Book, Chapter } from "@/data/books";
 import { useReadlay } from "./ReadlayProvider";
 import AudiobookPlayer, { type AudioSeekRequest, type ReaderMode } from "./AudiobookPlayer";
 import type { AudioPosition } from "@/lib/audio-sync";
 import { cfiForPosition, wordsInText } from "@/lib/epub-location";
+import { captureEpubWordSelection, wordSelectionAtOffsets, type AnchoredWordSelection } from "@/lib/epub-selection";
+import { useWordBank } from "./WordBankProvider";
+import DictionaryPopup from "./DictionaryPopup";
 import "./reader.css";
 
 type ReaderTheme = "light" | "sepia" | "dark";
@@ -21,13 +24,14 @@ function validLocation(chapters: Chapter[], chapter: number, paragraph: number) 
 }
 
 type ReaderProps = { book: Book; chapters: Chapter[]; editionId: string };
-const WordParagraph = memo(function WordParagraph({ text, words, index, offset, onSelect, onMove, onSelection }: {
+const WordParagraph = memo(function WordParagraph({ text, words, index, offset, savedRanges, onSelect, onMove, onSelection }: {
   text: string; words: ReturnType<typeof wordsInText>; index: number; offset?: number;
+  savedRanges?: Set<string>;
   onSelect: (event: MouseEvent<HTMLParagraphElement>, index: number) => void;
   onMove: (event: KeyboardEvent<HTMLParagraphElement>, index: number) => void;
-  onSelection: () => void;
+  onSelection: (keyboard?: boolean) => void;
 }) {
-  return <p className={index === 0 ? "reader-opening" : ""} tabIndex={0} aria-describedby="reader-word-help" onClick={(event) => onSelect(event, index)} onKeyDown={(event) => onMove(event, index)} onKeyUp={(event) => { if (event.shiftKey) onSelection(); }}>{words.length ? words.map((word, wordIndex) => <span key={word.charStart}>{text.slice(wordIndex ? words[wordIndex - 1].charEnd : 0, word.charStart)}<span className={`reader-word ${offset === word.charStart ? "is-current-word" : ""}`} data-word-start={word.charStart} data-word-end={word.charEnd} tabIndex={-1}>{text.slice(word.charStart, word.charEnd)}</span>{wordIndex === words.length - 1 ? text.slice(word.charEnd) : ""}</span>) : text}</p>;
+  return <p className={index === 0 ? "reader-opening" : ""} tabIndex={0} aria-describedby="reader-word-help" onClick={(event) => onSelect(event, index)} onDoubleClick={() => onSelection()} onKeyDown={(event) => onMove(event, index)} onKeyUp={(event) => { if (event.shiftKey) onSelection(true); }}>{words.length ? words.map((word, wordIndex) => <span key={word.charStart}>{text.slice(wordIndex ? words[wordIndex - 1].charEnd : 0, word.charStart)}<span className={`reader-word ${offset === word.charStart ? "is-current-word" : ""} ${savedRanges?.has(`${word.charStart}:${word.charEnd}`) ? "is-saved-vocabulary" : ""}`} data-word-start={word.charStart} data-word-end={word.charEnd} tabIndex={-1}>{text.slice(word.charStart, word.charEnd)}</span>{wordIndex === words.length - 1 ? text.slice(word.charEnd) : ""}</span>) : text}</p>;
 });
 
 export default function Reader({ book, chapters, editionId }: ReaderProps) {
@@ -36,6 +40,7 @@ export default function Reader({ book, chapters, editionId }: ReaderProps) {
 
 function ReaderContent({ book, chapters, editionId }: ReaderProps) {
   const { ready, getProgress, saveProgress, bookmarks, toggleBookmark, openAuth, notify, isSignedIn, syncStatus } = useReadlay();
+  const { words: vocabulary } = useWordBank();
   const progress = getProgress(book.id, editionId);
   const [chapterIndex, setChapterIndex] = useState(0);
   const [paragraphIndex, setParagraphIndex] = useState(0);
@@ -47,6 +52,7 @@ function ReaderContent({ book, chapters, editionId }: ReaderProps) {
   const [resumeReady, setResumeReady] = useState(false);
   const [mode, setMode] = useState<ReaderMode>("reading");
   const [audioSeek, setAudioSeek] = useState<AudioSeekRequest | null>(null);
+  const [dictionarySelection, setDictionarySelection] = useState<AnchoredWordSelection | null>(null);
   const initialised = useRef(false);
   const userHasActed = useRef(false);
   const pendingScroll = useRef<AudioPosition | null>(null);
@@ -61,13 +67,35 @@ function ReaderContent({ book, chapters, editionId }: ReaderProps) {
   const pendingSave = useRef<AudioPosition | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveProgressRef = useRef(saveProgress);
-  const wordHandlers = useRef({ selectWord, moveWord, selectRange: () => { const selected = selectionPosition(); if (selected) receiveAudioPosition(selected, true); } });
-  useEffect(() => { wordHandlers.current = { selectWord, moveWord, selectRange: () => { const selected = selectionPosition(); if (selected) receiveAudioPosition(selected, true); } }; });
+  const selectionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastDictionaryWord = useRef<AnchoredWordSelection | null>(null);
+  const wordHandlers = useRef({ selectWord, moveWord, selectRange: showSelectedDictionary });
+  useEffect(() => { wordHandlers.current = { selectWord, moveWord, selectRange: showSelectedDictionary }; });
   const handleWordSelect = useCallback((event: MouseEvent<HTMLParagraphElement>, index: number) => wordHandlers.current.selectWord(event, index), []);
   const handleWordMove = useCallback((event: KeyboardEvent<HTMLParagraphElement>, index: number) => wordHandlers.current.moveWord(event, index), []);
-  const handleRangeSelect = useCallback(() => wordHandlers.current.selectRange(), []);
+  const handleRangeSelect = useCallback((keyboard = false) => wordHandlers.current.selectRange(keyboard), []);
+  const closeDictionary = useCallback(() => {
+    if (dictionarySelection?.keyboard) article.current?.querySelector<HTMLElement>(`[data-paragraph="${dictionarySelection.paragraphIndex}"] [data-word-start="${dictionarySelection.charStart}"]`)?.focus({ preventScroll: true });
+    setDictionarySelection(null);
+  }, [dictionarySelection]);
+  const dictionaryAnchor = useCallback(() => {
+    if (!dictionarySelection || dictionarySelection.chapterIndex !== chapterIndex) return null;
+    const word = article.current?.querySelector<HTMLElement>(`[data-paragraph="${dictionarySelection.paragraphIndex}"] [data-word-start="${dictionarySelection.charStart}"]`);
+    return word?.getBoundingClientRect() ?? null;
+  }, [dictionarySelection, chapterIndex]);
   const chapter = chapters[chapterIndex];
   const chapterWords = useMemo(() => chapter?.paragraphs.map((text) => wordsInText(text)) ?? [], [chapter]);
+  const savedRanges = useMemo(() => {
+    const ranges = new Map<number, Set<string>>();
+    for (const item of vocabulary) for (const occurrence of item.occurrences) {
+      if (occurrence.bookId !== book.id || occurrence.editionId !== editionId || occurrence.chapterIndex !== chapterIndex) continue;
+      const paragraph = chapter?.paragraphs[occurrence.paragraphIndex];
+      if (!paragraph || paragraph.slice(occurrence.charStart, occurrence.charEnd) !== occurrence.selectedText) continue;
+      if (!ranges.has(occurrence.paragraphIndex)) ranges.set(occurrence.paragraphIndex, new Set());
+      ranges.get(occurrence.paragraphIndex)!.add(`${occurrence.charStart}:${occurrence.charEnd}`);
+    }
+    return ranges;
+  }, [vocabulary, book.id, editionId, chapterIndex, chapter]);
   const selectedText = chapter?.paragraphs[paragraphIndex] || "";
   const bookBookmarks = bookmarks.filter((entry) => entry.bookId === book.id && entry.editionId === editionId);
   const selectedBookmarked = bookBookmarks.some((entry) => entry.chapterIndex === chapterIndex && entry.paragraphIndex === paragraphIndex);
@@ -146,7 +174,7 @@ function ReaderContent({ book, chapters, editionId }: ReaderProps) {
     if (awaitingProgress.current === key) awaitingProgress.current = null;
     if (!isSignedIn || syncStatus !== "synced" || awaitingProgress.current) return;
     if (observedProgress.current === key) return;
-    if (mode !== "reading" || pendingSave.current || !progress || !validLocation(chapters, progress.chapterIndex, progress.paragraphIndex)) { observedProgress.current = key; return; }
+    if (mode !== "reading" || dictionarySelection || pendingSave.current || !progress || !validLocation(chapters, progress.chapterIndex, progress.paragraphIndex)) { observedProgress.current = key; return; }
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed && selection.focusNode && article.current?.contains(selection.focusNode)) { observedProgress.current = key; return; }
     if (positionKey(positionRef.current) === key) { observedProgress.current = key; return; }
@@ -166,7 +194,24 @@ function ReaderContent({ book, chapters, editionId }: ReaderProps) {
     return () => window.clearTimeout(timer);
   // Local coordinates also acknowledge saves that Provider deduplicates because
   // its projected position already matches, without publishing a new snapshot.
-  }, [ready, resumeReady, isSignedIn, syncStatus, mode, progress, chapters, chapterIndex, paragraphIndex, charOffset]);
+  }, [ready, resumeReady, isSignedIn, syncStatus, mode, progress, chapters, chapterIndex, paragraphIndex, charOffset, dictionarySelection]);
+
+  useEffect(() => {
+    if (!resumeReady || !article.current) return;
+    const doc = article.current.ownerDocument;
+    const changed = () => {
+      if (selectionTimer.current) clearTimeout(selectionTimer.current);
+      const selection = doc.getSelection();
+      // A long press may fire selectionchange before pointerup, or while its
+      // handles move. Keep the source selection separate from reading progress.
+      if (!selection?.isCollapsed && selection?.anchorNode && article.current?.contains(selection.anchorNode)) {
+        selectionTimer.current = setTimeout(() => wordHandlers.current.selectRange(), 150);
+      }
+    };
+    doc.addEventListener("selectionchange", changed);
+    return () => { doc.removeEventListener("selectionchange", changed); if (selectionTimer.current) clearTimeout(selectionTimer.current); };
+  }, [resumeReady]);
+
 
   useEffect(() => {
     if (!resumeReady || !article.current || pendingScroll.current === null) return;
@@ -190,6 +235,8 @@ function ReaderContent({ book, chapters, editionId }: ReaderProps) {
 
   function chooseParagraph(index: number, offset = 0) {
     if (!validLocation(chapters, chapterIndex, index)) return;
+    closeDictionary();
+    window.getSelection()?.removeAllRanges();
     userHasActed.current = true;
     setParagraphIndex(index);
     const next = { chapterIndex, paragraphIndex: index, charOffset: offset, cfi: cfiForPosition(chapterIndex, index, offset) };
@@ -202,6 +249,8 @@ function ReaderContent({ book, chapters, editionId }: ReaderProps) {
   function chooseChapter(index: number) {
     if (!validLocation(chapters, index, 0)) return;
     userHasActed.current = true;
+    closeDictionary();
+    window.getSelection()?.removeAllRanges();
     setChapterIndex(index);
     setParagraphIndex(0);
     setCharOffset(0);
@@ -260,6 +309,16 @@ function ReaderContent({ book, chapters, editionId }: ReaderProps) {
   }
 
   function readCurrentPosition() {
+    if (dictionarySelection) {
+      const next = { chapterIndex: dictionarySelection.chapterIndex, paragraphIndex: dictionarySelection.paragraphIndex, charOffset: dictionarySelection.charStart, cfi: dictionarySelection.cfiStart };
+      receiveAudioPosition(next, true);
+      closeDictionary();
+      window.getSelection()?.removeAllRanges();
+      return next;
+    }
+    const nativeWord = article.current && captureEpubWordSelection(article.current, chapters[chapterIndex].paragraphs, chapterIndex);
+    const lookedUp = lastDictionaryWord.current;
+    if (nativeWord && lookedUp && nativeWord.chapterIndex === lookedUp.chapterIndex && nativeWord.paragraphIndex === lookedUp.paragraphIndex && nativeWord.charStart === lookedUp.charStart && nativeWord.charEnd === lookedUp.charEnd) { flushProgress(); return positionRef.current; }
     const selected = selectionPosition();
     if (selected) { receiveAudioPosition(selected, true); return selected; }
     flushProgress();
@@ -269,12 +328,38 @@ function ReaderContent({ book, chapters, editionId }: ReaderProps) {
   function selectWord(event: MouseEvent<HTMLParagraphElement>, index: number) {
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed) {
-      const selected = selectionPosition();
-      if (selected) chooseParagraph(selected.paragraphIndex, selected.charOffset);
+      showSelectedDictionary();
       return;
     }
     const word = (event.target as Element).closest<HTMLElement>("[data-word-start]");
-    if (word) chooseParagraph(index, Number(word.dataset.wordStart));
+    if (!word) return;
+    const offset = Number(word.dataset.wordStart);
+    const selected = wordSelectionAtOffsets(chapters[chapterIndex].paragraphs[index], chapterIndex, index, offset, Number(word.dataset.wordEnd));
+    if (!selected) return;
+    const rect = word.getBoundingClientRect();
+    const anchored = { ...selected, anchor: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height } };
+    lastDictionaryWord.current = anchored;
+    setDictionarySelection(anchored);
+  }
+
+  function showSelectedDictionary(keyboard = false) {
+    if (!article.current) return;
+    const selected = captureEpubWordSelection(article.current, chapters[chapterIndex].paragraphs, chapterIndex);
+    if (!selected) return;
+    lastDictionaryWord.current = selected;
+    setDictionarySelection((current) => current && current.chapterIndex === selected.chapterIndex && current.paragraphIndex === selected.paragraphIndex && current.charStart === selected.charStart && current.charEnd === selected.charEnd ? current : { ...selected, keyboard });
+  }
+
+  function useDictionaryPosition() {
+    if (!dictionarySelection) return;
+    const next = { chapterIndex: dictionarySelection.chapterIndex, paragraphIndex: dictionarySelection.paragraphIndex, charOffset: dictionarySelection.charStart, cfi: dictionarySelection.cfiStart };
+    pendingScroll.current = next;
+    receiveAudioPosition(next, true);
+    setAudioSeek((current) => ({ ...next, revision: (current?.revision ?? 0) + 1 }));
+    setMode("reading");
+    closeDictionary();
+    window.getSelection()?.removeAllRanges();
+    notify("Reading place updated. Use Listen from here if narration is available.");
   }
 
   function moveWord(event: KeyboardEvent<HTMLParagraphElement>, index: number) {
@@ -305,12 +390,7 @@ function ReaderContent({ book, chapters, editionId }: ReaderProps) {
   if (!ready || !resumeReady) return <main id="main" className="reader-page reader-loading" aria-busy="true"><p role="status">Opening {book.title} at your saved place…</p></main>;
 
   return (
-    <div className={`reader-page reader-theme-${theme} reader-is-${mode} ${liveHighlight ? "reader-highlight-on" : ""}`} data-word-position={charOffset !== undefined ? "true" : undefined} style={{ "--reader-font-size": `${fontSize}px` } as CSSProperties} onPointerDownCapture={(event) => {
-      if ((event.target as Element).closest("button,select,input,a")) {
-        const selected = selectionPosition();
-        if (selected) receiveAudioPosition(selected, true);
-      }
-    }}>
+    <div className={`reader-page reader-theme-${theme} reader-is-${mode} ${liveHighlight ? "reader-highlight-on" : ""}`} data-word-position={charOffset !== undefined ? "true" : undefined} style={{ "--reader-font-size": `${fontSize}px` } as CSSProperties}>
       <header className="reader-header">
         <Link className="reader-brand" href="/" aria-label="Readlay library">
           <span className="reader-brand-mark" aria-hidden="true"><i /><i /></span>
@@ -318,6 +398,7 @@ function ReaderContent({ book, chapters, editionId }: ReaderProps) {
         </Link>
         <div className="reader-book-name"><span>{book.title}</span><span>By {book.author}</span></div>
         <nav className="reader-tools" aria-label="Reading tools">
+          <Link className="reader-icon-button" href="/word-bank" aria-label="Open Word Bank"><BookOpen size={20} /></Link>
           <button className="reader-icon-button" aria-label="Open table of contents" aria-haspopup="dialog" onClick={() => setPanel("contents")}><List size={21} /></button>
           <button className="reader-icon-button reader-type-button" aria-label="Adjust reading appearance" aria-haspopup="dialog" onClick={() => setPanel("settings")}><Type size={21} /></button>
           <span className="reader-tools-divider" aria-hidden="true" />
@@ -331,18 +412,18 @@ function ReaderContent({ book, chapters, editionId }: ReaderProps) {
         <AudiobookPlayer bookId={book.id} editionId={editionId} bookTitle={book.title} author={book.author} chapters={chapters} location={{ chapterIndex, paragraphIndex, ...(charOffset !== undefined ? { charOffset, cfi: cfiForPosition(chapterIndex, paragraphIndex, charOffset) } : {}) }} seekRequest={audioSeek} mode={mode} onModeChange={setMode} onPositionChange={receiveAudioPosition} onReturnToReading={returnToReading} getReadingPosition={readCurrentPosition} />
         <div className="reader-layout">
           <aside className="reader-margin" aria-label="Current chapter"><span>{String(chapterIndex + 1).padStart(2, "0")}</span><span>of {String(chapters.length).padStart(2, "0")}</span><i aria-hidden="true" /></aside>
-          <article ref={article} className="reader-article" aria-labelledby="reader-title">
+          <article ref={article} className="reader-article" aria-labelledby="reader-title" onPointerUp={() => showSelectedDictionary()}>
             <div className="reader-chapter-label">Chapter {chapterIndex + 1}</div>
             <h1 id="reader-title" tabIndex={-1}>{chapter.title}</h1>
             <div className="reader-chapter-rule" aria-hidden="true"><i /><i /></div>
-            <div className="reader-word-tools"><p id="reader-word-help">Tap a word to set your place. Use the left and right arrow keys when a paragraph has focus.</p><label><input type="checkbox" checked={liveHighlight} onChange={(event) => { const value = event.target.checked; setLiveHighlight(value); try { localStorage.setItem(preferencesKey, JSON.stringify({ fontSize, theme, liveHighlight: value })); } catch { /* The current session keeps this setting. */ } }} />Highlight narration</label></div>
+            <div className="reader-word-tools"><p id="reader-word-help">Tap, double-click or long-press a word for its meaning. Choose Set reading place to move there, or Listen from here to hear it. Arrow keys move your place; Shift-select looks up a word.</p><label><input type="checkbox" checked={liveHighlight} onChange={(event) => { const value = event.target.checked; setLiveHighlight(value); try { localStorage.setItem(preferencesKey, JSON.stringify({ fontSize, theme, liveHighlight: value })); } catch { /* The current session keeps this setting. */ } }} />Highlight narration</label></div>
             <div className="reader-prose">
               {chapter.paragraphs.map((text, index) => {
                 const isCurrent = index === paragraphIndex;
                 const isBookmarked = bookBookmarks.some((entry) => entry.chapterIndex === chapterIndex && entry.paragraphIndex === index);
                 return <div key={`${chapter.id}-${index}`} data-paragraph={index} className={`reader-passage ${isCurrent ? "is-current" : ""} ${isBookmarked ? "has-bookmark" : ""}`}>
                   <button className="reader-position-marker" onClick={() => chooseParagraph(index)} aria-label={`Save reading position at paragraph ${index + 1}`} aria-pressed={isCurrent} title="Save your place here">{isBookmarked ? <BookmarkCheck size={15} /> : <span />}</button>
-                  <WordParagraph text={text} words={chapterWords[index]} index={index} offset={isCurrent ? charOffset : undefined} onSelect={handleWordSelect} onMove={handleWordMove} onSelection={handleRangeSelect} />
+                  <WordParagraph text={text} words={chapterWords[index]} index={index} offset={isCurrent ? charOffset : undefined} savedRanges={savedRanges.get(index)} onSelect={handleWordSelect} onMove={handleWordMove} onSelection={handleRangeSelect} />
                 </div>;
               })}
             </div>
@@ -357,9 +438,11 @@ function ReaderContent({ book, chapters, editionId }: ReaderProps) {
           </div>
           <div className="reader-progress-row"><span>{book.title}</span><span>{overallProgress}% through the book</span></div>
           <div className="reader-progress-track" role="progressbar" aria-label={`Reading position through ${book.title}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={overallProgress}><span style={{ scale: `${position / allParagraphs} 1` }} /></div>
-          <div className="reader-save-row"><span>Tap a word to save your place.</span>{!isSignedIn && <button onClick={openAuth}>Sign in to read across devices<ArrowRight size={14} /></button>}</div>
+          <div className="reader-save-row"><span>Look up a word without losing your place.</span>{!isSignedIn && <button onClick={openAuth}>Sign in to read across devices<ArrowRight size={14} /></button>}</div>
         </footer>
       </main>
+
+      {dictionarySelection && <DictionaryPopup key={`${dictionarySelection.chapterIndex}:${dictionarySelection.paragraphIndex}:${dictionarySelection.charStart}`} selection={dictionarySelection} bookId={book.id} editionId={editionId} getAnchor={dictionaryAnchor} onClose={closeDictionary} onUsePosition={useDictionaryPosition} />}
 
       <dialog ref={dialog} className="reader-dialog" aria-labelledby="reader-panel-title" onCancel={() => setPanel(null)} onClose={() => { setPanel(null); previousFocus.current?.focus(); }} onClick={(event) => { if (event.target === dialog.current) setPanel(null); }}>
         <div className="reader-panel-heading"><h2 id="reader-panel-title">{panel === "contents" ? "Contents" : "Reading appearance"}</h2><button className="reader-icon-button" aria-label={panel === "contents" ? "Close table of contents" : "Close reading settings"} onClick={() => setPanel(null)}><X size={20} /></button></div>

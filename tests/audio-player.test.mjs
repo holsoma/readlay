@@ -48,6 +48,8 @@ function playerHarness({ source = manifest, textChapters = chapters, location = 
   const mediaHandlers = new Map();
   const requests = [];
   const positions = [];
+  const documentListeners = new Map();
+  const document = { visibilityState: "visible", addEventListener: (name, callback) => documentListeners.set(name, callback), removeEventListener: (name) => documentListeners.delete(name) };
   const blobUrls = { live: new Set(), created: [], revoked: [], peak: 0 };
   let unmounting = false;
   let cursor = 0;
@@ -105,6 +107,7 @@ function playerHarness({ source = manifest, textChapters = chapters, location = 
     },
     globals: {
       window: { setTimeout, clearTimeout },
+      document,
       navigator: { connection: { saveData }, mediaSession: { metadata: null, setActionHandler(action, handler) { if (handler) mediaHandlers.set(action, handler); else mediaHandlers.delete(action); } } },
       localStorage: { getItem: () => null, setItem() {} },
       Blob,
@@ -141,6 +144,7 @@ function playerHarness({ source = manifest, textChapters = chapters, location = 
   }
   const app = {
     audio, props, mediaHandlers, requests, positions, blobUrls, settle,
+    hide() { document.visibilityState = "hidden"; documentListeners.get("visibilitychange")?.(); },
     status: () => content(find(tree, (node) => node.props?.className === "reader-audio-status")),
     button: (label) => find(tree, (node) => node.type === "button" && node.props["aria-label"] === label).props,
     slider: () => find(tree, (node) => node.type === "input" && node.props.type === "range").props,
@@ -177,6 +181,28 @@ test("rewind after the chapter ends clears the ended status and restores its par
   assert.equal(app.props.location.paragraphIndex, 2);
   assert.match(app.status(), /Paragraph 3\./);
   assert.equal(app.audio.paused, true, "rewinding does not resume a paused recording");
+});
+
+test("an explicit reading place survives audiobook pause and later page hiding", async (t) => {
+  const app = playerHarness({ source: wordManifest, textChapters: wordChapters }); t.after(() => app.cleanup());
+  await app.start();
+  app.audio.currentTime = 2.8;
+  app.audioProps().onTimeUpdate();
+  await app.settle();
+  const word = wordManifest.chapters[0].words.find((item) => item.paragraphIndex === 1 && item.charStart > 0);
+  const selected = { chapterIndex: 0, paragraphIndex: word.paragraphIndex, charOffset: word.charStart, cfi: word.cfi };
+  app.positions.length = 0;
+  app.props.location = selected;
+  app.props.seekRequest = { ...selected, revision: 1 };
+  app.props.onModeChange("reading");
+  await app.settle();
+  assert.equal(app.audio.paused, true);
+  assert.deepEqual(app.props.location, selected, "pausing the old recording must not replace the explicitly selected reading word");
+  assert.equal(app.positions.length, 0, "the pause event does not report an old audio position in reading mode");
+  app.hide();
+  await app.settle();
+  assert.deepEqual(app.props.location, selected, "hiding a reading page must not replace its place with the old audio time");
+  assert.equal(app.positions.length, 0);
 });
 
 test("slider seeking after the chapter ends clears the ended status", async (t) => {

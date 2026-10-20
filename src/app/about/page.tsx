@@ -21,7 +21,7 @@ export default function AboutPage() {
         </section>
         <section>
           <h2>Text comes first.</h2>
-          <p>Adjust the text size and page colour. Where word-aligned narration is available, tap a word to listen from there and return to the word being narrated. Images and diagrams are omitted.</p>
+          <p>Adjust the text size and page colour. Tap or select a word for its definition and pronunciation, then save it to your Word Bank. Where word-aligned narration is available, choose Listen from here to start at that word and return to it while reading. Images and diagrams are omitted.</p>
         </section>
         <section>
           <h2>Open code. Private books.</h2>

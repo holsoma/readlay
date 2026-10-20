@@ -49,6 +49,9 @@ Version 1 paragraph MP3 manifests remain readable with their actual precision la
 | `/api/auth/*` | Auth.js GitHub OAuth and sessions |
 | `GET /api/library` | Current account's progress, saved books and bookmarks |
 | `POST /api/library` | Validated, idempotent progress/save/bookmark action |
+| `GET /api/dictionary?word=<word>` | Authenticated, cached lookup using the free Dictionary API |
+| `GET /api/word-bank` | Current account's saved vocabulary and source occurrences |
+| `POST /api/word-bank` | Save a source word, change its learning status or remove it |
 | `GET /api/audio/<bookId>` | Narrators for the current edition |
 | `GET /api/audio/<bookId>?narrator=<id>` | Validated synchronisation manifest |
 | `GET /api/audio/<bookId>?narrator=<id>&index=1` | Small chapter index without word timing arrays |
@@ -61,11 +64,23 @@ The Supabase service key stays on the server. GitHub controls who receives an au
 
 ## Playback and resume
 
-Readers tap a word or select text to identify where they stopped. The application cannot infer eye position. Reading to listening seeks to that word's acoustic start time. A position inside a word selects that word; whitespace selects the following word, or the final word at paragraph end. Listening to reading finds the current word for `currentTime`, updates the shared position and scrolls to the marked word. Pauses retain the preceding word until the next begins. Optional live highlighting follows the same cues.
+Readers tap a word or select text to open its dictionary. Choosing Set reading place or Listen from here explicitly uses that word as the reading position. A lookup alone does not move the shared position or seek audio. The application cannot infer eye position. Reading to listening seeks to the selected word's acoustic start time. A position inside a word selects that word; whitespace selects the following word, or the final word at paragraph end. Listening to reading finds the current word for `currentTime`, updates the shared position and scrolls to the marked word. Pauses retain the preceding word until the next begins. Optional live highlighting follows the same cues.
 
 Word updates change the reader state immediately. Persistence is debounced during continuous playback and flushed on pause, seek, mode change and page visibility change. Database state is authoritative on sign-in. Account-specific caches and queues prevent another account's library appearing. Progress has word precision across modes and devices; bookmarks remain paragraph-based. Playback speed and reading appearance are device preferences. The six speed settings change native `playbackRate` only.
 
 The player keeps current and next chapter timing data in memory and bounds optional audio prefetch to 2 MiB. Data-saving connections skip that prefetch. Larger chapters still stream normally, so network delays can interrupt a chapter change; preloading is not a guarantee of offline availability.
+
+## Dictionary and Word Bank
+
+The current reader renders cleaned EPUB text directly into the page and scrolls by chapter. It has no EPUB iframe or paginated rendition. `epub-selection.ts` reads ranges from the article's owner document, checks exact lexical word boundaries and records the containing sentence and canonical CFI range. DOM word spans retain their source UTF-16 offsets when fonts or layout change. A future iframe or pagination adapter must supply these same source coordinates and translate its selection rectangle to the outer viewport; there is no claim of testing an iframe renderer that the application does not use.
+
+A tap, native double-click, long-press selection or keyboard selection opens a non-modal contextual dictionary. Normalised single English words are looked up through an authenticated route. Only the word goes to [Dictionary API](https://dictionaryapi.dev/), never its sentence, book title, user ID or reading history. Exact lookup is tried before conservative inflection fallbacks after a missing entry. Lookup errors, missing definitions and missing pronunciation remain explicit. There is no AI definition or speech fallback. Responses retain source and licence attribution. Audio URLs are limited to the dictionary's known HTTPS pronunciation paths.
+
+The server bounds response size, request time, in-flight lookups and memory caches. Successful entries are also cached through Next.js fetch revalidation. The popup keeps a small client cache and cancels obsolete requests. Separate pronunciation audio never seeks, pauses or replaces audiobook media. The popup tracks its source rectangle on resize and scroll, stays within the viewport, supports Escape and outside dismissal, and does not trap keyboard focus.
+
+Migration `003_word_bank.sql` adds words and source occurrences. A word is unique per authenticated account and resolved dictionary headword. Each occurrence is unique by word, edition, chapter, paragraph and exact start/end offsets. Saving an existing word at another location adds context without resetting its learning status or first saved date. The server derives source spelling, sentence, CFIs and the dictionary snapshot; client-supplied definitions or CFI paths are not trusted. Composite ownership constraints and cascading deletion keep occurrences attached to their account's words.
+
+`WordBankProvider` is separate from reading progress. It uses the existing GitHub session, serialises pulls and mutations, discards responses after account changes and refreshes on focus, reconnection and cross-tab invalidation. Vocabulary and sentences stay in server storage and account-scoped memory; local storage carries only an invalidation marker. Word Bank API responses are private and never cached publicly. The page searches words, definitions and source context, sorts entries, updates New/Learning/Learned status and links back through the stored canonical CFI start coordinates. Saved highlights apply only to recorded occurrences in the matching book edition. Their dotted underline differs from native selection and the current narration marker. Removing a word removes its occurrences and highlights.
 
 ## Operations
 

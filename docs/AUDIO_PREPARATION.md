@@ -115,7 +115,7 @@ The location scheme is `readlay-canonical-epub-v1`. Both the actual EPUB structu
 
 Schema v2 includes `alignment: "word"`, `format: "opus"`, `sampleRate: 24000`, narrator, source edition, coverage and canonical EPUB hash. Each chapter contains `byteLength`, audio SHA256, sample-derived paragraph segments, optional sentence cues, and `words` with `paragraphIndex`, `charStart`, `charEnd`, `startSeconds`, `endSeconds` and `cfi`. Publication requires exact coverage of every source lexical word, matching paragraph hashes, monotonic valid timestamps and canonical CFIs.
 
-The website changes `HTMLMediaElement.playbackRate` for 0.75, 1, 1.25, 1.5, 1.75 and 2. No audio is regenerated. Reading to listening uses the selected source word's cue. Listening to reading uses the current audio word cue and the same shared location. The browser cannot infer a silent reader's eye position; selecting or setting the current word supplies that location.
+The website changes `HTMLMediaElement.playbackRate` for 0.75, 1, 1.25, 1.5, 1.75 and 2. No audio is regenerated. Reading to listening uses the selected source word's cue when Listen from here is chosen. Opening or saving a dictionary entry leaves the shared position unchanged. Listening to reading uses the current audio word cue and the same shared location. The browser cannot infer a silent reader's eye position; explicitly setting the current word or choosing Listen supplies that location.
 
 Existing schema v1 paragraph-aligned MP3 uploads remain supported. Use `--legacy-paragraph-mp3` only when maintaining them. They remain labelled paragraph alignment and must never be described as exact word synchronisation.
 

@@ -11,6 +11,7 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/read/*": [".local/books/*.json"],
     "/api/library": [".local/books/*.json"],
+    "/api/word-bank": [".local/books/*.json"],
     "/api/audio/*": [".local/books/*.json", ...audiobookMetadata],
   },
   // Automatic directory tracing must not package local preparation assets.

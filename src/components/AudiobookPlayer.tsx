@@ -242,7 +242,7 @@ export default function AudiobookPlayer(props: PlayerProps) {
 
   useEffect(() => {
     if (typeof document === "undefined") return;
-    const flush = () => { if (document.visibilityState === "hidden") reportTime(true); };
+    const flush = () => { if (document.visibilityState === "hidden" && modeRef.current === "listening") reportTime(true); };
     document.addEventListener("visibilitychange", flush);
     return () => document.removeEventListener("visibilitychange", flush);
   }, [reportTime]);
@@ -354,7 +354,7 @@ export default function AudiobookPlayer(props: PlayerProps) {
 
   return <section className={`reader-audio ${mode === "listening" ? "is-listening" : ""}`} aria-label="Reading and listening">
     <div className="reader-audio-heading">
-      <div className="reader-mode-controls" role="group" aria-label="Reading mode"><button aria-pressed={mode === "reading"} onClick={returnToReading}>Read</button><button aria-pressed={mode === "listening"} disabled={!canListen || loadingManifest} onClick={listenFromHere}><Headphones size={16} aria-hidden="true" />Listen from here</button></div>
+      <div className="reader-mode-controls" role="group" aria-label="Reading mode"><button aria-pressed={mode === "reading"} onClick={returnToReading}>Read</button><button data-reader-listen aria-pressed={mode === "listening"} disabled={!canListen || loadingManifest} onClick={listenFromHere}><Headphones size={16} aria-hidden="true" />Listen from here</button></div>
       {narrators && narrators.length > 1 ? <label className="reader-narrator"><span>Narrator</span><select aria-label="Audiobook narrator" value={narratorId} onChange={(event) => changeNarrator(event.target.value)}>{narrators.map((narrator) => <option key={narrator.id} value={narrator.id}>{narrator.name}</option>)}</select></label> : index && <span className="reader-narrator-name">{index.narrator.name}</span>}
     </div>
     {mode === "listening" && index && <div className="reader-audio-controls">
@@ -368,11 +368,11 @@ export default function AudiobookPlayer(props: PlayerProps) {
       <label className="reader-audio-seek"><span className="sr-only">Audio position in current chapter</span><input type="range" min={0} max={maxTime || 1} step={0.01} value={Math.min(time, maxTime || 1)} disabled={!target || maxTime <= 0 || waiting} aria-valuetext={`${clock(time)} of ${clock(maxTime)}`} onChange={(event) => seek(Number(event.target.value))} /></label>
       <label className="reader-audio-chapters"><span>Chapter</span><select aria-label="Audiobook chapter" value={target?.chapterIndex ?? location.chapterIndex} onChange={(event) => { reportTime(true); void openPosition({ chapterIndex: Number(event.target.value), paragraphIndex: 0, charOffset: 0 }, !!audio.current && !audio.current.paused); }}>{index.chapters.map((item) => <option key={item.chapterIndex} value={item.chapterIndex}>{item.chapterIndex + 1}. {item.title}</option>)}</select></label>
     </div>}
-    {!error && <p className="reader-audio-status" role="status">{message || (narrators === null || loadingManifest ? "Checking audio…" : !narrators.length ? "Audio is not available for this edition." : chapterPrepared && !chapterLoaded ? "Loading audio positions…" : !canListen ? "Audio is not available at this position." : mode === "listening" ? waiting ? "Loading audio…" : <><Volume2 size={13} aria-hidden="true" />Paragraph {location.paragraphIndex + 1}. {exact ? "Switch to Read to return to this word." : "This recording resumes at paragraph boundaries."}</> : exact ? "Tap a word, then listen from that word." : "Paragraph audio. Listening starts at the beginning of the selected paragraph.")}</p>}
+    {!error && <p className="reader-audio-status" role="status">{message || (narrators === null || loadingManifest ? "Checking audio…" : !narrators.length ? "Audio is not available for this edition." : chapterPrepared && !chapterLoaded ? "Loading audio positions…" : !canListen ? "Audio is not available at this position." : mode === "listening" ? waiting ? "Loading audio…" : <><Volume2 size={13} aria-hidden="true" />Paragraph {location.paragraphIndex + 1}. {exact ? "Switch to Read to return to this word." : "This recording resumes at paragraph boundaries."}</> : exact ? "Look up a word, then choose Listen from here to hear it." : "Paragraph audio. Listening starts at the beginning of the selected paragraph.")}</p>}
     {error && <div className="reader-audio-error"><p role="alert">{error}</p><button onClick={retryAudio}>Retry audio</button></div>}
     <audio ref={audio} preload="metadata" src={src}
       onLoadedMetadata={() => { if (target) loadedSource.current = sourceKey(target); applyPendingSeek(); releaseUnusedBlobs(); }} onCanPlay={() => { setWaiting(false); applyPendingSeek(); }} onEmptied={releaseUnusedBlobs}
-      onPlaying={() => { setPlaying(true); setWaiting(false); setError(""); }} onPause={() => { setPlaying(false); reportTime(true); }} onWaiting={() => setWaiting(true)}
+      onPlaying={() => { setPlaying(true); setWaiting(false); setError(""); }} onPause={() => { setPlaying(false); if (modeRef.current === "listening") reportTime(true); }} onWaiting={() => setWaiting(true)}
       onTimeUpdate={() => { if (audio.current && !pendingSeek.current) { setTime(audio.current.currentTime); if (modeRef.current === "listening") reportTime(); } }} onSeeked={reportSeek}
       onDurationChange={() => { if (audio.current && Number.isFinite(audio.current.duration)) setDuration(audio.current.duration); }} onEnded={ended}
       onError={() => { if (!activeTarget.current) return; pendingSeek.current = null; setWaiting(false); setPlaying(false); setError("Audio could not be loaded. Check your connection and retry."); }} />

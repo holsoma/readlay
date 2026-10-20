@@ -160,3 +160,40 @@
 .reader-audio-chapters{display:flex;align-items:center;gap:10px;font-size:10px;color:var(--reader-muted)}
 .reader-audio-chapters select{font:inherit;font-size:11px;min-height:44px;min-width:0;max-width:100%;flex:1;padding:8px;border:1px solid var(--reader-line);border-radius:3px;color:var(--reader-ink);background:var(--reader-panel)}
 @media(max-width:600px){.reader-word-tools{display:block;margin-top:-5px;margin-bottom:24px}.reader-word-tools p{max-width:none}.reader-word-tools label{margin-top:3px}.reader-audio-transport{flex-wrap:wrap}.reader-audio-position{flex-basis:calc(100% - 165px);min-width:0}.reader-audio-speed{margin-left:auto}.reader-word{scroll-margin-top:270px}.reader-audio-chapters{gap:8px}}
+.reader-word.is-saved-vocabulary{background:color-mix(in srgb,var(--reader-ink) 7%,transparent);text-decoration-line:underline;text-decoration-style:dotted;text-decoration-color:var(--reader-muted);text-decoration-thickness:1px;text-underline-offset:5px}
+.reader-word.is-saved-vocabulary.is-current-word{background:var(--reader-line);text-decoration-style:solid;text-decoration-color:var(--reader-accent);text-decoration-thickness:2px}
+.reader-prose ::selection{background:#d9c68a;color:#253d31}
+.reader-dictionary{position:fixed;z-index:30;box-sizing:border-box;overflow-y:auto;overscroll-behavior:contain;padding:17px 20px 18px;background:var(--reader-panel);color:var(--reader-ink);border:1px solid var(--reader-line);border-radius:7px;box-shadow:0 8px 32px #15291c20;font-family:var(--font-manrope),sans-serif;font-size:12px;line-height:1.6;outline:none;scrollbar-gutter:stable}
+.reader-dictionary:focus-visible{outline:2px solid var(--reader-accent);outline-offset:3px}
+.reader-dictionary-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--reader-muted);font-size:9px;text-transform:uppercase;letter-spacing:.13em;margin:-7px -8px 0 0}
+.reader-dictionary-heading .reader-icon-button{width:40px;height:40px;min-height:40px}
+.reader-dictionary-word{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.reader-dictionary-word h2{font-family:var(--font-newsreader),Georgia,serif;font-size:34px;font-weight:400;line-height:1.1;letter-spacing:-.6px;margin:0;overflow-wrap:anywhere}
+.reader-dictionary-word .pronunciation-button{font-size:10px;min-height:40px;padding:7px;gap:5px;color:var(--reader-ink);border-color:var(--reader-line)}
+.reader-dictionary-word .pronunciation-error{max-width:100px;font-size:9px}
+.reader-dictionary-phonetic{margin:7px 0 0;color:var(--reader-muted);font-size:12px;letter-spacing:.02em;overflow-wrap:anywhere}
+.reader-dictionary-base{font-size:10px;color:var(--reader-muted);margin:8px 0 0}
+.reader-dictionary-meanings{margin:19px 0 0}
+.reader-dictionary-meanings section+section{border-top:1px solid var(--reader-line);margin-top:17px;padding-top:15px}
+.reader-dictionary-meanings h3{font-size:10px;font-weight:600;font-style:italic;color:var(--reader-muted);margin:0 0 8px}
+.reader-dictionary-meanings ol{margin:0;padding-left:18px}
+.reader-dictionary-meanings li{padding-left:2px;margin:0 0 10px}
+.reader-dictionary-meanings li::marker{font-size:10px;color:var(--reader-muted)}
+.reader-dictionary-meanings li p{margin:0;overflow-wrap:anywhere}
+.reader-dictionary-meanings .reader-dictionary-example{margin-top:5px;color:var(--reader-muted);font-size:11px}
+.reader-dictionary-message{padding:17px 0 6px;color:var(--reader-text);font-size:12px}
+.reader-dictionary-message p{margin:0 0 7px}
+.reader-dictionary-retry{border:0;background:none;color:var(--reader-ink);padding:7px 0;min-height:40px;text-decoration:underline;text-underline-offset:3px;font-size:11px;cursor:pointer}
+.reader-dictionary-unavailable{font-size:10px;color:var(--reader-muted);margin:15px 0 0}
+.reader-dictionary-source{display:flex;flex-wrap:wrap;gap:4px 11px;font-size:9px;color:var(--reader-muted);margin-top:14px;line-height:1.6}
+.reader-dictionary-source a{text-decoration:underline;text-underline-offset:3px}
+.reader-dictionary-actions{display:flex;gap:9px;align-items:stretch;margin-top:17px}
+.reader-dictionary-save{display:flex;align-items:center;justify-content:center;gap:7px;min-height:44px;flex:1;background:var(--reader-ink);color:var(--reader-paper);border:1px solid var(--reader-ink);border-radius:3px;padding:10px 8px;font-size:11px;font-weight:600;cursor:pointer}
+.reader-dictionary-save:disabled{opacity:.7;cursor:default}
+.reader-dictionary-actions>a{display:grid;place-items:center;min-width:44px;border:1px solid var(--reader-line);border-radius:3px;color:var(--reader-ink)}
+.reader-dictionary-save-error{color:var(--reader-text);font-size:11px;margin:10px 0 0}
+.reader-dictionary-saved-note{color:var(--reader-muted);font-size:10px;margin:9px 0 0}
+@media(max-width:600px){.reader-tools .reader-icon-button{width:36px}.reader-tools{gap:0}.reader-dictionary{padding:15px 18px 16px}.reader-dictionary-word h2{font-size:31px}}
+
+.reader-dictionary-position{width:100%;min-height:44px;margin-top:12px;padding:8px;border:1px solid var(--reader-line);border-radius:3px;background:transparent;color:var(--reader-ink);font-size:11px;font-weight:600;cursor:pointer}
+.reader-is-listening:not(.reader-highlight-on) .reader-word.is-saved-vocabulary.is-current-word{background:color-mix(in srgb,var(--reader-ink) 7%,transparent);text-decoration-line:underline;text-decoration-style:dotted;text-decoration-color:var(--reader-muted);text-decoration-thickness:1px;text-underline-offset:5px}

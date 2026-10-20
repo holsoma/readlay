@@ -8,6 +8,12 @@ export function cfiForPosition(chapterIndex: number, paragraphIndex: number, cha
   return `epubcfi(/6/${2 * (chapterIndex + 1)}[chapter-${chapterIndex + 1}]!/4/${2 * (paragraphIndex + 1)}/1:${charOffset})`;
 }
 
+/** Both endpoints address the same canonical paragraph text node. */
+export function cfiForRange(chapterIndex: number, paragraphIndex: number, charStart: number, charEnd: number): string {
+  if (![chapterIndex, paragraphIndex, charStart, charEnd].every(coordinate) || charEnd <= charStart) throw new RangeError("Invalid EPUB text range.");
+  return `epubcfi(/6/${2 * (chapterIndex + 1)}[chapter-${chapterIndex + 1}]!/4/${2 * (paragraphIndex + 1)},/1:${charStart},/1:${charEnd})`;
+}
+
 export function parseEpubCfi(value: unknown): EpubTextPosition | null {
   if (typeof value !== "string" || value.length > 200) return null;
   const match = /^epubcfi\(\/6\/(\d+)\[chapter-(\d+)\]!\/4\/(\d+)\/1:(\d+)\)$/.exec(value);

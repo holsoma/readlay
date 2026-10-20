@@ -8,7 +8,9 @@ Read ebooks and switch to prepared audiobooks at your selected word.
 
 - Read on desktop or mobile, with adjustable text size and themes.
 - Sign in with GitHub to synchronise reading progress, saved books and bookmarks.
-- Tap a word to listen from there, then return to the word being narrated.
+- Look up a word with a tap, double-click or text selection, then save its definition and original context to your Word Bank.
+- Search saved vocabulary, track New, Learning and Learned words, and return to their exact book locations.
+- Choose Listen from here for a selected word, then return to the word being narrated. Looking up and saving words preserves your reading and audio positions.
 - Choose a narrator and a playback speed from 0.75× to 2×.
 - Prepare narration and word alignment locally with Kokoro and a free acoustic model. The website streams existing chapter Opus files without a speech API or GPU. Older paragraph MP3 recordings remain supported at their original precision.
 

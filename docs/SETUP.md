@@ -56,11 +56,19 @@ See [audio preparation](AUDIO_PREPARATION.md) for installation, model download, 
 - Upload completed Opus files and metadata to the existing **private** Supabase Storage bucket, allowing the `audio/ogg` MIME type. Deploy matching manifests only after upload. The server checks editions, source words, hashes, CFIs and paths before issuing expiring stream URLs.
 - Playback speeds are 0.75, 1, 1.25, 1.5, 1.75 and 2 using the browser's `playbackRate`. Speed changes never regenerate audio.
 
-Only prepared chapters are offered. Tap a word or select text before choosing Listen. Playback begins at that word, and returning to Read marks and focuses the word currently being narrated. The shared character offset survives device and mode changes. CFIs address the cleaned canonical EPUB exported by the preparation script, rather than the unmodified source archive. Legacy version 1 MP3 recordings remain available with paragraph precision clearly labelled.
+Only prepared chapters are offered. Tap a word or select text to open the dictionary, then choose Set reading place or Listen from here. Playback begins at the explicitly selected word, and returning to Read marks and focuses the word currently being narrated. Dictionary lookup and saving alone do not change progress. The shared character offset survives device and mode changes. CFIs address the cleaned canonical EPUB exported by the preparation script, rather than the unmodified source archive. Legacy version 1 MP3 recordings remain available with paragraph precision clearly labelled.
 
 Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `AUDIO_STORAGE_BUCKET` on the server and preparation computer. Keep the bucket private and the service key out of the browser. `AUDIO_STORAGE_MODE=local` enables authenticated local audio preview; this option is ignored on Vercel.
 
 Kokoro has no per-character API fee. Local generation uses the preparation computer's resources. Storage, bandwidth and hosting remain subject to service allowances and pricing. No Azure Speech package, key or variable is required.
+
+## Dictionary and vocabulary
+
+Dictionary lookup uses the free [Dictionary API](https://dictionaryapi.dev/) and needs no API key or paid AI service. The normal server must reach `api.dictionaryapi.dev`; pronunciation plays from the API's validated media URL, with its source and licence shown. Some entries have no audio or phonetic transcription. Missing entries and service failures are shown in the popup with retry controls.
+
+The Word Bank uses the existing GitHub identity and Neon connection. The normal migration command now also runs `003_word_bank.sql`; no new database or authentication provider is required. The Vercel build applies it before serving the feature. The word-saving route needs the same private `.local/books/*.json` server files as the reader, included through `outputFileTracingIncludes` for `/api/word-bank`. These files must remain outside `public` and Git.
+
+Open a word, choose Save to Word Bank, then use Word Bank in the sidebar, mobile navigation or reader toolbar. A repeat save at the same location is idempotent; saving the word elsewhere adds another original context. The Word Bank supports search, sorting, three learning states, removal and return links. Its saved occurrence highlights use edition-specific character ranges and remain stable after text size changes. Reimporting a changed edition does not apply old highlights to different text.
 
 ## Deploy to Vercel
 
