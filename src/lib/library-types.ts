@@ -1,6 +1,9 @@
 export type ReadingProgress = {
   chapterIndex: number;
   paragraphIndex: number;
+  // UTF-16 offset in the cleaned paragraph. Missing offsets from older clients mean 0.
+  charOffset?: number;
+  cfi?: string;
 };
 
 export type SavedPassage = ReadingProgress & {

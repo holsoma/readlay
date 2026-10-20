@@ -122,7 +122,7 @@ class PipelineTests(unittest.TestCase):
             self.skipTest("ffmpeg and ffprobe are required for this integration test")
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            common = [str(FIXTURE), "--book-id", "fixture", "--rights-confirmed", "--output-root", str(root / "audio"), "--cache-root", str(root / "cache")]
+            common = [str(FIXTURE), "--book-id", "fixture", "--rights-confirmed", "--legacy-paragraph-mp3", "--output-root", str(root / "audio"), "--cache-root", str(root / "cache")]
             with contextlib.redirect_stdout(io.StringIO()):
                 manifest_path = generate(arguments(common + ["--chapters", "1"]), TestProvider)
                 manifest, plan, _ = upload_plan(manifest_path, root / "audio")
@@ -150,7 +150,7 @@ class PipelineTests(unittest.TestCase):
             self.skipTest("ffmpeg and ffprobe are required for this integration test")
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            common = [str(FIXTURE), "--book-id", "fixture", "--rights-confirmed", "--output-root", str(root / "audio"), "--cache-root", str(root / "cache"), "--chapters", "1"]
+            common = [str(FIXTURE), "--book-id", "fixture", "--rights-confirmed", "--legacy-paragraph-mp3", "--output-root", str(root / "audio"), "--cache-root", str(root / "cache"), "--chapters", "1"]
             with contextlib.redirect_stdout(io.StringIO()):
                 path = generate(arguments(common), TestProvider)
                 previous = json.loads(path.read_text())
@@ -201,6 +201,8 @@ class StorageTests(unittest.TestCase):
                     pass
                 def require_private_bucket(self, *_):
                     pass
+                def _existing_matches(self, *_):
+                    return True
                 def upload(self, *args):
                     calls.append(args)
                     if len(args) > 4 and self.fail_manifest:

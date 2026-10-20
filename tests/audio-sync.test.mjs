@@ -1,23 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import Module from "node:module";
-import { fileURLToPath } from "node:url";
-import ts from "typescript";
-
-const directory = path.dirname(fileURLToPath(import.meta.url));
-
-// Run the pure TypeScript helpers without adding a test runtime to the website.
-function loadTypeScript(relativePath) {
-  const filename = path.resolve(directory, relativePath);
-  const source = fs.readFileSync(filename, "utf8");
-  const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } });
-  const compiled = new Module(filename);
-  compiled.filename = filename;
-  compiled._compile(outputText, filename);
-  return compiled.exports;
-}
+import { loadTypeScript as load, plain } from "./helpers/load-typescript.mjs";
+const loadTypeScript = (relative) => load(relative.replace("../", ""));
 
 const { segmentAtTime, segmentForParagraph, seekTimeForParagraph, isManifestForEdition } = loadTypeScript("../src/lib/audio-sync.ts");
 const { parseAudioManifest, parseAudioNarrators } = loadTypeScript("../src/lib/audio-types.ts");
@@ -101,7 +85,7 @@ test("manifest parser accepts valid offsets and rejects malformed timing, indexe
 test("narrator list treats no prepared recording as unavailable and rejects duplicate voices", () => {
   assert.deepEqual(parseAudioNarrators({ narrators: [] }), []);
   const voice = { id: "heart", name: "Heart", language: "en-US" };
-  assert.deepEqual(parseAudioNarrators({ narrators: [voice] }), [voice]);
+  assert.deepEqual(plain(parseAudioNarrators({ narrators: [voice] })), [voice]);
   assert.equal(parseAudioNarrators({ narrators: [voice, voice] }), null);
   assert.equal(parseAudioNarrators({ narrators: [{ ...voice, id: "../secret" }] }), null);
   assert.equal(parseAudioNarrators({}), null);

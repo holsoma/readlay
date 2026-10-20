@@ -3,6 +3,10 @@
 kokoro==0.9.4
 misaki[en]==0.9.4
 numpy>=1.26,<3
+transformers==5.20.2
+scipy==1.17.0
+num2words==0.5.14
+safetensors==0.8.0
 # Kokoro installs PyTorch, spaCy, huggingface_hub and transformers transitively.
 # Once installed: python -m spacy download en_core_web_sm
 # ffmpeg and ffprobe are separate command-line tools and must be on PATH.

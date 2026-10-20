@@ -17,11 +17,11 @@ export default function AboutPage() {
         <p className="about-intro">Eight books about habits, people, the mind and money.</p>
         <section>
           <h2>Keep your place.</h2>
-          <p>Choose a chapter, save a passage and return to the paragraph you reached. Sign in with GitHub to keep your place across devices.</p>
+          <p>Choose a chapter, save a passage and return to the word you reached. Sign in with GitHub to keep your place across devices.</p>
         </section>
         <section>
           <h2>Text comes first.</h2>
-          <p>Adjust the text size and page colour. Where narration is available, listen from your current paragraph and return to the same place. Images and diagrams are omitted.</p>
+          <p>Adjust the text size and page colour. Where word-aligned narration is available, tap a word to listen from there and return to the word being narrated. Images and diagrams are omitted.</p>
         </section>
         <section>
           <h2>Open code. Private books.</h2>

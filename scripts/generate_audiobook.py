@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare paragraph-aligned audiobooks locally. No website service uses Python."""
+"""Prepare sentence-cached, word-aligned Opus audiobooks entirely locally."""
 
 from __future__ import annotations
 
@@ -35,16 +35,19 @@ def arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--model-revision", default="main", help="Hugging Face model revision or commit; actual asset hashes are recorded")
     parser.add_argument("--device", choices=("cpu", "cuda", "mps"), default="cpu")
     parser.add_argument("--chapters", help="One-based chapter selection, for example 1,3-5; partial coverage is recorded")
-    parser.add_argument("--max-chars", type=int, default=350, help="Maximum characters per model call inside a paragraph")
+    parser.add_argument("--max-chars", type=int, default=350, help="Maximum source characters per sentence model call")
     parser.add_argument("--paragraph-gap-ms", type=int, default=300)
-    parser.add_argument("--bitrate", choices=("48k", "64k", "80k", "96k", "128k"), default="64k")
+    parser.add_argument("--bitrate", choices=("24k", "32k", "48k", "64k", "80k", "96k", "128k"), help="Defaults to 24k for mono Opus; 64k for legacy MP3")
     parser.add_argument("--output-root", type=Path, default=ROOT / ".local" / "audiobooks")
     parser.add_argument("--cache-root", type=Path, default=ROOT / ".local" / "audio-cache")
     parser.add_argument("--rights-confirmed", action="store_true", help="Record that you have permission to prepare and distribute this edition's audio")
     parser.add_argument("--rights-file", type=Path, help="JSON {bookId,editionId,audioDistributionAllowed:true}; stored locally only")
     parser.add_argument("--allow-download", action="store_true", help="One-off model setup; default generation uses only cached models")
     parser.add_argument("--dry-run", action="store_true", help="Inspect input and chunk counts without dependencies, writes or network")
-    return parser.parse_args(argv)
+    parser.add_argument("--legacy-paragraph-mp3", action="store_true", help="Maintain an existing schema v1 paragraph MP3 rendition; new books should use the default word-aligned Opus pipeline")
+    args = parser.parse_args(argv)
+    args.bitrate = args.bitrate or ("64k" if args.legacy_paragraph_mp3 else "24k")
+    return args
 
 
 def rights_record(args: argparse.Namespace, book: dict) -> dict:
@@ -61,7 +64,7 @@ def rights_record(args: argparse.Namespace, book: dict) -> dict:
     return {"audioDistributionAllowed": True, "basis": "operator-confirmation"}
 
 
-def generate(args: argparse.Namespace, provider_factory=None) -> Path | None:
+def generate_legacy(args: argparse.Namespace, provider_factory=None) -> Path | None:
     identifier(args.book_id, "bookId")
     if not re.fullmatch(r"[ab][fm]_[a-z0-9_]+", args.voice):
         raise PreparationError("Use an English Kokoro voice ID such as af_heart, bf_emma or bm_george.")
@@ -157,6 +160,13 @@ def generate(args: argparse.Namespace, provider_factory=None) -> Path | None:
         print(f"Chapter ready: {frames / SAMPLE_RATE:.2f}s; {audio_file.stat().st_size:,} bytes.", flush=True)
     print(f"Finished in {time.monotonic() - started:.1f}s. Manifest: {manifest_path}")
     return manifest_path
+
+
+def generate(args: argparse.Namespace, provider_factory=None, aligner_factory=None) -> Path | None:
+    if args.legacy_paragraph_mp3:
+        return generate_legacy(args, provider_factory)
+    from audio.word_pipeline import generate_word_audio
+    return generate_word_audio(args, rights_record, provider_factory, aligner_factory)
 
 
 def main(argv: list[str] | None = None) -> int:

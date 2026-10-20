@@ -1,6 +1,6 @@
 # Readlay
 
-Read ebooks and switch to prepared audiobooks at your current paragraph.
+Read ebooks and switch to prepared audiobooks at your selected word.
 
 **[Open Readlay](https://readlay.vercel.app)**
 
@@ -8,9 +8,9 @@ Read ebooks and switch to prepared audiobooks at your current paragraph.
 
 - Read on desktop or mobile, with adjustable text size and themes.
 - Sign in with GitHub to synchronise reading progress, saved books and bookmarks.
-- Listen from a selected paragraph and return to the matching text.
+- Tap a word to listen from there, then return to the word being narrated.
 - Choose a narrator and a playback speed from 0.75× to 2×.
-- Prepare narration locally with Kokoro. The website streams existing chapter MP3s without a speech API or GPU.
+- Prepare narration and word alignment locally with Kokoro and a free acoustic model. The website streams existing chapter Opus files without a speech API or GPU. Older paragraph MP3 recordings remain supported at their original precision.
 
 Built with Next.js, TypeScript, Auth.js, Neon PostgreSQL and private Supabase Storage. Audio preparation uses Python separately from the website.
 
@@ -31,7 +31,7 @@ Book text, generated audio, model files and credentials are excluded from this r
 ## Documentation
 
 - [Setup and deployment](docs/SETUP.md)
-- [Architecture and paragraph synchronisation](docs/ARCHITECTURE.md)
+- [Architecture and word synchronisation](docs/ARCHITECTURE.md)
 - [Local Kokoro generation and audio upload](docs/AUDIO_PREPARATION.md)
 
 ## Checks

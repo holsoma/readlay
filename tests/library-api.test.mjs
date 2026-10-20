@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { loadTypeScript, testBooks } from "./helpers/load-typescript.mjs";
+import { loadTypeScript, plain, testBooks } from "./helpers/load-typescript.mjs";
 
 function storeHarness() {
   const queries = [];
@@ -13,7 +13,7 @@ function storeHarness() {
   const content = {
     editionId: "edition-a",
     chapters: [
-      { title: "Start", paragraphs: ["First paragraph.", "Second paragraph."] },
+      { title: "Start", paragraphs: ["First paragraph.", "Second paragraph.", "Start 😀 then words."] },
       { title: "Next", paragraphs: ["Third paragraph."] },
     ],
   };
@@ -23,6 +23,7 @@ function storeHarness() {
       "@neondatabase/serverless": { neon: () => sql },
       "@/data/books": { books: testBooks },
       "@/lib/book-content": { getBookContent: async () => content },
+      "@/lib/epub-location": loadTypeScript("src/lib/epub-location.ts"),
     },
     env: { DATABASE_URL: "test-only-connection" },
   });
@@ -136,4 +137,50 @@ test("store filters old editions and invalid rows and hydrates bookmarks from bo
   assert.equal(Object.keys(state.progressByEdition).length, 1);
   assert.equal(state.savedIds.length, 1);
   assert.equal(state.lastReadBookId, "atomic-habits");
+  assert.deepEqual(plain(state.progressByEdition["atomic-habits:edition-a"]), {
+    chapterIndex: 0, paragraphIndex: 1, charOffset: 0,
+    cfi: "epubcfi(/6/2[chapter-1]!/4/4/1:0)",
+  }, "legacy paragraph positions resume at offset 0");
+});
+
+test("word progress round-trips exact offsets and derives its CFI from authenticated coordinates", async () => {
+  const { store, queries, setRows } = storeHarness();
+  const input = { type: "progress", bookId: "atomic-habits", editionId: "edition-a", chapterIndex: 0, paragraphIndex: 2, charOffset: 8, cfi: "epubcfi(/6/2[chapter-1]!/4/6/1:8)", expectedUserId: "untrusted-user" };
+  const action = store.parseLibraryAction(input);
+  await store.applyLibraryAction("authenticated-user", action);
+  assert.match(queries[0].text, /char_offset/);
+  assert.deepEqual(plain(queries[0].values), ["authenticated-user", "atomic-habits", "edition-a", 0, 2, 8]);
+  setRows([[{ book_id: "atomic-habits", edition_id: "edition-a", chapter_index: 0, paragraph_index: 2, char_offset: 8 }], [], []]);
+  const state = await store.getLibraryState("authenticated-user");
+  assert.deepEqual(plain(state.progressByEdition["atomic-habits:edition-a"]), {
+    chapterIndex: 0, paragraphIndex: 2, charOffset: 8,
+    cfi: "epubcfi(/6/2[chapter-1]!/4/6/1:8)",
+  });
+});
+
+test("word progress rejects malformed offsets and mismatched or malicious CFI strings", async () => {
+  const { store, queries } = storeHarness();
+  const input = { type: "progress", bookId: "atomic-habits", editionId: "edition-a", chapterIndex: 0, paragraphIndex: 2, expectedUserId: "A" };
+  for (const charOffset of [-1, 0.25, null, "8", NaN, Infinity, 2_147_483_648]) {
+    assert.throws(() => store.parseLibraryAction({ ...input, charOffset }), error => error.status === 400, String(charOffset));
+  }
+  for (const cfi of [false, null, "javascript:alert(1)", "epubcfi(/6/2[chapter-1]!/4/6/1:4)", "epubcfi(/6/4[chapter-2]!/4/6/1:8)", "epubcfi(/6/2[chapter-1]!/4/4/1:8)"]) {
+    assert.throws(() => store.parseLibraryAction({ ...input, charOffset: 8, cfi }), error => error.status === 400, String(cfi));
+  }
+  // Structural parsing is deliberately separate from checking the private book text.
+  for (const charOffset of [7, 100]) {
+    const action = store.parseLibraryAction({ ...input, charOffset });
+    await assert.rejects(store.applyLibraryAction("A", action), error => error.status === 400);
+  }
+  assert.equal(queries.length, 0, "invalid positions must never write to storage");
+});
+
+test("invalid persisted word offsets are filtered without exposing broken locations", async () => {
+  const { store, setRows } = storeHarness();
+  for (const charOffset of [-1, 7, 100, null]) {
+    setRows([[{ book_id: "atomic-habits", edition_id: "edition-a", chapter_index: 0, paragraph_index: 2, char_offset: charOffset }], [], []]);
+    const state = await store.getLibraryState("A");
+    assert.deepEqual(plain(state.progressByEdition), {});
+    assert.equal(state.lastReadBookId, null);
+  }
 });

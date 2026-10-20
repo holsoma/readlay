@@ -2,6 +2,7 @@ import "server-only";
 import { neon } from "@neondatabase/serverless";
 import { books } from "@/data/books";
 import { getBookContent, type BookContent } from "@/lib/book-content";
+import { cfiForPosition, parseEpubCfi } from "@/lib/epub-location";
 import type { LibraryAction, LibraryRequest, LibraryState, ReadingProgress, SavedPassage } from "@/lib/library-types";
 
 export class LibraryError extends Error {
@@ -30,6 +31,18 @@ function isPosition(value: unknown): value is ReadingProgress & Record<string, u
     Number.isSafeInteger(value.paragraphIndex) && Number(value.paragraphIndex) >= 0;
 }
 
+function precisePosition(value: ReadingProgress): ReadingProgress | null {
+  if (!isPosition(value)) return null;
+  const charOffset = value.charOffset === undefined ? 0 : value.charOffset;
+  if (!Number.isSafeInteger(charOffset) || charOffset < 0 || charOffset > 2_147_483_647) return null;
+  if (value.cfi !== undefined) {
+    if (typeof value.cfi !== "string") return null;
+    const parsed = parseEpubCfi(value.cfi);
+    if (!parsed || parsed.chapterIndex !== value.chapterIndex || parsed.paragraphIndex !== value.paragraphIndex || parsed.charOffset !== charOffset) return null;
+  }
+  return { chapterIndex: value.chapterIndex, paragraphIndex: value.paragraphIndex, charOffset, cfi: cfiForPosition(value.chapterIndex, value.paragraphIndex, charOffset) };
+}
+
 export function parseLibraryAction(value: unknown): LibraryRequest {
   if (!isRecord(value) || typeof value.bookId !== "string" || !bookById.has(value.bookId) ||
     typeof value.expectedUserId !== "string" || !value.expectedUserId || value.expectedUserId.length > 128) {
@@ -49,7 +62,11 @@ export function parseLibraryAction(value: unknown): LibraryRequest {
     chapterIndex: value.chapterIndex,
     paragraphIndex: value.paragraphIndex,
   };
-  if (value.type === "progress") return { ...location, type: "progress" };
+  if (value.type === "progress") {
+    const precise = precisePosition(value);
+    if (!precise) throw new LibraryError(400, "Invalid reading location.");
+    return { ...location, ...precise, type: "progress" };
+  }
   if (value.type === "bookmark" && typeof value.saved === "boolean") {
     return { ...location, type: "bookmark", saved: value.saved };
   }
@@ -65,6 +82,19 @@ function positionExists(content: BookContent, position: ReadingProgress): boolea
   return isPosition(position) && typeof content.chapters[position.chapterIndex]?.paragraphs[position.paragraphIndex] === "string";
 }
 
+function precisePositionExists(content: BookContent, position: ReadingProgress): boolean {
+  if (!positionExists(content, position)) return false;
+  const precise = precisePosition(position);
+  if (!precise) return false;
+  const paragraph = content.chapters[position.chapterIndex].paragraphs[position.paragraphIndex];
+  const offset = precise.charOffset!;
+  if (offset > paragraph.length) return false;
+  // Browser Range offsets and EPUB CFIs use UTF-16. Never save half an astral character.
+  const before = paragraph.charCodeAt(offset - 1);
+  const after = paragraph.charCodeAt(offset);
+  return !(before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff);
+}
+
 async function requireContent(bookId: string): Promise<BookContent> {
   const content = await getBookContent(bookId);
   if (!content) throw new LibraryError(503, "This book is unavailable.");
@@ -74,7 +104,7 @@ async function requireContent(bookId: string): Promise<BookContent> {
 export async function getLibraryState(userId: string): Promise<LibraryState> {
   const sql = database();
   const [progressRows, savedRows, bookmarkRows] = await sql.transaction([
-    sql`SELECT book_id, edition_id, chapter_index, paragraph_index
+    sql`SELECT book_id, edition_id, chapter_index, paragraph_index, char_offset
         FROM readlay_progress WHERE user_id = ${userId}
         ORDER BY updated_at DESC, book_id, edition_id`,
     sql`SELECT book_id FROM readlay_saved_books WHERE user_id = ${userId}
@@ -96,8 +126,8 @@ export async function getLibraryState(userId: string): Promise<LibraryState> {
   for (const row of currentProgress) {
     const bookId = row.book_id as string;
     const content = contents.get(bookId);
-    const position = { chapterIndex: row.chapter_index, paragraphIndex: row.paragraph_index };
-    if (!content || !positionExists(content, position)) continue;
+    const position = precisePosition({ chapterIndex: row.chapter_index, paragraphIndex: row.paragraph_index, charOffset: row.char_offset === undefined ? 0 : row.char_offset });
+    if (!content || !position || !precisePositionExists(content, position)) continue;
     progressByEdition[locationKey(bookId, content.editionId)] = position;
     lastReadBookId ??= bookId;
   }
@@ -145,12 +175,15 @@ export async function applyLibraryAction(userId: string, action: LibraryAction):
   }
 
   if (action.type === "progress") {
+    if (!precisePositionExists(content, action)) throw new LibraryError(400, "Invalid reading location.");
+    const charOffset = action.charOffset ?? 0;
     await sql`INSERT INTO readlay_progress
-        (user_id, book_id, edition_id, chapter_index, paragraph_index, updated_at)
-        VALUES (${userId}, ${action.bookId}, ${action.editionId}, ${action.chapterIndex}, ${action.paragraphIndex}, CURRENT_TIMESTAMP)
+        (user_id, book_id, edition_id, chapter_index, paragraph_index, char_offset, updated_at)
+        VALUES (${userId}, ${action.bookId}, ${action.editionId}, ${action.chapterIndex}, ${action.paragraphIndex}, ${charOffset}, CURRENT_TIMESTAMP)
         ON CONFLICT (user_id, book_id, edition_id) DO UPDATE SET
           chapter_index = EXCLUDED.chapter_index,
           paragraph_index = EXCLUDED.paragraph_index,
+          char_offset = EXCLUDED.char_offset,
           updated_at = CURRENT_TIMESTAMP`;
     return;
   }

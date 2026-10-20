@@ -33,7 +33,48 @@ function manifest() {
   };
 }
 
-function storeHarness({ audio = manifest(), marker, env = {}, fetch: fetchStub } = {}) {
+const wordContent = {
+  editionId: "edition-a",
+  chapters: [
+    { id: "chapter-one", title: "One", paragraphs: ["First paragraph.", "Don't restart this paragraph halfway."] },
+    { id: "chapter-two", title: "Two", paragraphs: ["Read 😀 slowly, then café."] },
+  ],
+};
+
+function wordManifest() {
+  // List the expected spoken words independently of the application's tokenizer.
+  const chapterWords = [[['First', 'paragraph'], ["Don't", 'restart', 'this', 'paragraph', 'halfway']], [['Read', 'slowly', 'then', 'café']]];
+  const audio = manifest();
+  return {
+    ...audio, schemaVersion: 2, alignment: "word", format: "opus", locationScheme: "readlay-canonical-epub-v1",
+    coverage: { complete: true, totalChapters: 2, chapterIndices: [0, 1] },
+    chapters: wordContent.chapters.map((chapter, chapterIndex) => ({
+      chapterIndex, chapterId: chapter.id, title: chapter.title,
+      audioPath: `${bookId}/edition-a/${narratorId}/generation-one/chapter-${String(chapterIndex + 1).padStart(4, "0")}.opus`,
+      durationSeconds: chapter.paragraphs.length * 4, byteLength: 4096,
+      segments: chapter.paragraphs.map((text, paragraphIndex) => ({
+        paragraphIndex, startSeconds: paragraphIndex * 4, endSeconds: (paragraphIndex + 1) * 4, textHash: sha256(text),
+      })),
+      words: chapter.paragraphs.flatMap((text, paragraphIndex) => {
+        let offset = 0;
+        return chapterWords[chapterIndex][paragraphIndex].map((word, wordIndex) => {
+          const charStart = text.indexOf(word, offset);
+          assert.notEqual(charStart, -1, `The fixture word ${word} must exist in its source paragraph`);
+          const charEnd = charStart + word.length;
+          offset = charEnd;
+          return {
+            paragraphIndex, charStart, charEnd,
+            startSeconds: paragraphIndex * 4 + wordIndex * 0.6,
+            endSeconds: paragraphIndex * 4 + wordIndex * 0.6 + 0.45,
+            cfi: `epubcfi(/6/${2 * (chapterIndex + 1)}[chapter-${chapterIndex + 1}]!/4/${2 * (paragraphIndex + 1)}/1:${charStart})`,
+          };
+        });
+      }),
+    })),
+  };
+}
+
+function storeHarness({ audio = manifest(), marker, env = {}, fetch: fetchStub, sourceContent = content } = {}) {
   const bytes = JSON.stringify(audio);
   const publication = marker === undefined ? {
     storageOrigin: origin, bucket: "readlay-audio", generationId: audio.generationId, manifestHash: sha256(bytes),
@@ -47,7 +88,7 @@ function storeHarness({ audio = manifest(), marker, env = {}, fetch: fetchStub }
       "server-only": {},
       "@/data/books": { books: [{ id: bookId, editionId: "edition-a" }] },
       "@/lib/audio-types": audioTypes,
-      "@/lib/book-content": { getBookContent: async () => { calls.content++; return content; } },
+      "@/lib/book-content": { getBookContent: async () => { calls.content++; return sourceContent; } },
       "node:fs/promises": {
         readFile: async (file) => {
           calls.files.push(file);
@@ -101,6 +142,9 @@ test("both audio routes reject missing GitHub sessions before opening private fi
     for (const [api, request] of [
       [routes.metadata, new Request(`https://readlay.test/api/audio/${bookId}`)],
       [routes.metadata, new Request(`https://readlay.test/api/audio/${bookId}?narrator=${narratorId}`)],
+      [routes.metadata, new Request(`https://readlay.test/api/audio/${bookId}?narrator=${narratorId}&index=1`)],
+      [routes.metadata, new Request(`https://readlay.test/api/audio/${bookId}?narrator=${narratorId}&chapter=0&v=generation-one`)],
+      [routes.metadata, new Request(`https://readlay.test/api/audio/${bookId}?narrator=${narratorId}&chapter=-1`)],
       [routes.stream, streamRequest()],
     ]) {
       const response = await api.GET(request, context());
@@ -252,6 +296,133 @@ test("local streaming returns the requested bytes and rejects unsatisfiable or m
     const response = await routes.stream.GET(streamRequest("", { Range: range }), context());
     assert.equal(response.status, 416);
     assert.equal(response.headers.get("Content-Range"), "bytes */10");
+  }
+  assert.equal(routes.streams.length, opened);
+  assert.equal(calls.fetch.length, 0);
+});
+
+test("word-aligned Opus narration covers every exact source word, including contractions and UTF-16 locations", async () => {
+  const audio = wordManifest();
+  const { store } = storeHarness({ audio, sourceContent: wordContent });
+  const loaded = await store.getAudioManifest(bookId, narratorId);
+  assert.equal(loaded.schemaVersion, 2);
+  assert.equal(loaded.format, "opus");
+  assert.equal(loaded.alignment, "word");
+  assert.equal(loaded.chapters[0].words.length, 7);
+  assert.equal(loaded.chapters[1].words.length, 4);
+  const contraction = loaded.chapters[0].words[2];
+  assert.equal(wordContent.chapters[0].paragraphs[1].slice(contraction.charStart, contraction.charEnd), "Don't");
+  const afterEmoji = loaded.chapters[1].words[1];
+  assert.equal(afterEmoji.charStart, 8, "the astral character occupies two UTF-16 code units");
+  assert.equal(afterEmoji.cfi, "epubcfi(/6/4[chapter-2]!/4/2/1:8)");
+  assert.deepEqual(plain(await store.listNarrators(bookId)), [{ id: narratorId, name: "Alice", language: "en-GB" }]);
+});
+
+test("word narration rejects missing or extra lexical cues, changed source hashes and mismatched CFIs", async () => {
+  for (const [name, change] of [
+    ["missing word", audio => { audio.chapters[0].words.splice(3, 1); }],
+    ["truncated final word", audio => { audio.chapters[1].words.pop(); }],
+    ["inexact word end", audio => { audio.chapters[0].words[0].charEnd++; }],
+    ["different paragraph hash", audio => { audio.chapters[0].segments[1].textHash = sha256("Changed text."); }],
+    ["different CFI word offset", audio => { audio.chapters[1].words[1].cfi = "epubcfi(/6/4[chapter-2]!/4/2/1:9)"; }],
+    ["different CFI chapter", audio => { audio.chapters[1].words[1].cfi = "epubcfi(/6/2[chapter-1]!/4/2/1:8)"; }],
+    ["different CFI paragraph", audio => { audio.chapters[1].words[1].cfi = "epubcfi(/6/4[chapter-2]!/4/4/1:8)"; }],
+    ["malicious CFI", audio => { audio.chapters[1].words[1].cfi = "javascript:alert(1)"; }],
+    ["punctuation is not an extra spoken word", audio => {
+      audio.chapters[0].words.splice(2, 0, {
+        paragraphIndex: 0, charStart: 15, charEnd: 16, startSeconds: 2, endSeconds: 2.4,
+        cfi: "epubcfi(/6/2[chapter-1]!/4/2/1:15)",
+      });
+    }],
+    ["MP3 path in an Opus manifest", audio => { audio.chapters[0].audioPath = audio.chapters[0].audioPath.replace(/\.opus$/, ".mp3"); }],
+    ["path traversal", audio => { audio.chapters[0].audioPath = `${bookId}/edition-a/${narratorId}/generation-one/../chapter-0001.opus`; }],
+  ]) {
+    const audio = wordManifest(); change(audio);
+    const { store, calls } = storeHarness({ audio, sourceContent: wordContent });
+    await assert.rejects(store.getAudioManifest(bookId, narratorId), error => error.status === 503, name);
+    assert.deepEqual(plain(await store.listNarrators(bookId)), [], name);
+    assert.equal(calls.fetch.length, 0, name);
+  }
+});
+
+test("authenticated metadata index omits cue arrays and a chapter request returns exactly one complete chapter", async () => {
+  const audio = wordManifest();
+  const { store, calls } = storeHarness({ audio, sourceContent: wordContent });
+  const routes = routeHarness(store);
+  const base = `https://readlay.test/api/audio/${bookId}?narrator=${narratorId}&v=generation-one`;
+  const response = await routes.metadata.GET(new Request(`${base}&index=1`), context());
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("Cache-Control"), /private.*no-store/);
+  assert.equal(response.headers.get("Vary"), "Cookie");
+  assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+  const index = await response.json();
+  assert.equal(index.generationId, "generation-one");
+  assert.equal(index.alignment, "word");
+  assert.equal(index.chapters.length, 2);
+  assert.equal(audioTypes.parseAudioManifestIndex(index)?.format, "opus");
+  for (const chapter of index.chapters) {
+    assert.equal(Object.hasOwn(chapter, "words"), false);
+    assert.equal(Object.hasOwn(chapter, "segments"), false);
+  }
+  for (const chapterIndex of [0, 1]) {
+    const chapterResponse = await routes.metadata.GET(new Request(`${base}&chapter=${chapterIndex}&index=1`), context());
+    assert.equal(chapterResponse.status, 200);
+    const chapter = await chapterResponse.json();
+    assert.deepEqual(chapter, audio.chapters[chapterIndex]);
+    assert.equal(Object.hasOwn(chapter, "chapters"), false);
+    assert.equal(audioTypes.parseAudioChapter(chapter, true)?.chapterIndex, chapterIndex);
+  }
+  assert.equal(calls.fetch.length, 0, "metadata must never request a signed storage URL");
+  assert.equal(routes.streams.length, 0);
+});
+
+test("Opus metadata and streams reject superseded generations and invalid chapter queries", async () => {
+  const { store, calls } = storeHarness({ audio: wordManifest(), sourceContent: wordContent });
+  const routes = routeHarness(store);
+  const base = `https://readlay.test/api/audio/${bookId}?narrator=${narratorId}`;
+  for (const suffix of ["&index=1&v=older-generation", "&chapter=0&v=older-generation"]) {
+    const response = await routes.metadata.GET(new Request(`${base}${suffix}`), context());
+    assert.equal(response.status, 404);
+    assert.match(response.headers.get("Cache-Control"), /private.*no-store/);
+    assert.equal((await response.text()).includes('"words"'), false);
+  }
+  assert.equal((await routes.stream.GET(streamRequest("&v=older-generation"), context())).status, 404);
+  for (const chapter of ["", "-1", "0.5", "NaN", "1e0", "100000", "../1"]) {
+    assert.equal((await routes.metadata.GET(new Request(`${base}&chapter=${encodeURIComponent(chapter)}`), context())).status, 400, chapter);
+    const streamUrl = `https://readlay.test/api/audio/${bookId}/stream?narrator=${narratorId}&chapter=${encodeURIComponent(chapter)}`;
+    assert.equal((await routes.stream.GET(new Request(streamUrl), context())).status, 400, chapter);
+  }
+  assert.equal((await routes.metadata.GET(new Request(`${base}&chapter=2`), context())).status, 404);
+  assert.equal((await routes.stream.GET(new Request(`https://readlay.test/api/audio/${bookId}/stream?narrator=${narratorId}&chapter=2`), context())).status, 404);
+  assert.equal(calls.fetch.length, 0);
+  assert.equal(routes.streams.length, 0);
+});
+
+test("local Opus streaming advertises Ogg audio and supports byte-range seeks without signing a URL", async () => {
+  const { store, calls } = storeHarness({
+    audio: wordManifest(), sourceContent: wordContent, marker: null, env: { AUDIO_STORAGE_MODE: "local" },
+  });
+  const bytes = Buffer.from("OggS-test-opus-data");
+  const routes = routeHarness(store, { localBytes: bytes });
+  const complete = await routes.stream.GET(streamRequest("&v=generation-one"), context());
+  assert.equal(complete.status, 200);
+  assert.equal(complete.headers.get("Content-Type"), "audio/ogg");
+  assert.equal(complete.headers.get("Accept-Ranges"), "bytes");
+  assert.equal(complete.headers.get("Content-Length"), String(bytes.length));
+  assert.equal(await complete.text(), bytes.toString());
+  const partial = await routes.stream.GET(streamRequest("&v=generation-one", { Range: "bytes=5-8" }), context());
+  assert.equal(partial.status, 206);
+  assert.equal(partial.headers.get("Content-Type"), "audio/ogg");
+  assert.equal(partial.headers.get("Content-Range"), `bytes 5-8/${bytes.length}`);
+  assert.equal(await partial.text(), bytes.subarray(5, 9).toString());
+  assert.match(partial.headers.get("Cache-Control"), /private.*no-store/);
+  assert.equal(partial.headers.get("Vary"), "Cookie");
+  assert.equal(partial.headers.get("X-Content-Type-Options"), "nosniff");
+  assert.equal(routes.streams.every(stream => stream.file.endsWith("chapter-0001.opus")), true);
+  const opened = routes.streams.length;
+  for (const range of ["bytes=999-", "bytes=8-5", "bytes=0-1,5-6"]) {
+    const response = await routes.stream.GET(streamRequest("", { Range: range }), context());
+    assert.equal(response.status, 416);
   }
   assert.equal(routes.streams.length, opened);
   assert.equal(calls.fetch.length, 0);

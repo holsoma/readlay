@@ -88,7 +88,11 @@ function syncHarness() {
       state.savedIds = state.savedIds.filter((id) => id !== action.bookId);
       if (action.saved) state.savedIds.push(action.bookId);
     } else if (action.type === "progress") {
-      state.progressByEdition[`${action.bookId}:${action.editionId}`] = { chapterIndex: action.chapterIndex, paragraphIndex: action.paragraphIndex };
+      state.progressByEdition[`${action.bookId}:${action.editionId}`] = {
+        chapterIndex: action.chapterIndex, paragraphIndex: action.paragraphIndex,
+        charOffset: action.charOffset ?? 0,
+        cfi: `epubcfi(/6/${2 * (action.chapterIndex + 1)}[chapter-${action.chapterIndex + 1}]!/4/${2 * (action.paragraphIndex + 1)}/1:${action.charOffset ?? 0})`,
+      };
       state.lastReadBookId = action.bookId;
     } else if (action.type === "bookmark") {
       const id = `${action.bookId}:${action.editionId}:${action.chapterIndex}:${action.paragraphIndex}`;
@@ -106,6 +110,7 @@ function syncHarness() {
       "next-auth/react": {},
       "next/navigation": { useRouter: () => ({ push() {} }) },
       "@/data/books": { books: testBooks },
+      "@/lib/epub-location": loadTypeScript("src/lib/epub-location.ts"),
     },
     globals: { window, document, navigator, localStorage, fetch },
   });
@@ -208,4 +213,59 @@ test("another account cannot see cached account data or import guest data", asyn
   assert.deepEqual(plain(guest.render().savedIds), ["power-of-now"]);
   assert.equal(guest.render().syncStatus, "local");
   assert.equal(guest.render().isSignedIn, false);
+});
+
+test("two positions in the same paragraph remain distinct and restore on another device", async (t) => {
+  const app = syncHarness(); t.after(() => app.cleanup());
+  const first = app.mount(); await settle();
+  first.render().saveProgress(0, 1, "atomic-habits", "edition-a", 7); await settle();
+  first.render().saveProgress(0, 1, "atomic-habits", "edition-a", 12); await settle();
+  assert.deepEqual(app.sends.map(action => action.charOffset), [7, 12]);
+  assert.equal(app.sends[1].cfi, "epubcfi(/6/2[chapter-1]!/4/4/1:12)");
+  // Repeating the exact same word must not create another write.
+  first.render().saveProgress(0, 1, "atomic-habits", "edition-a", 12); await settle();
+  assert.equal(app.sends.length, 2);
+  first.unmount();
+  app.storage.delete("readlay-v4:github:A");
+  const second = app.mount(); await settle();
+  assert.deepEqual(plain(second.render().getProgress("atomic-habits", "edition-a")), {
+    chapterIndex: 0, paragraphIndex: 1, charOffset: 12,
+    cfi: "epubcfi(/6/2[chapter-1]!/4/4/1:12)",
+  });
+});
+
+test("offline word progress survives a remount and only the latest unsent offset is synchronised", async (t) => {
+  const app = syncHarness(); t.after(() => app.cleanup());
+  let tab = app.mount(); await settle();
+  app.setOffline(true);
+  tab.render().saveProgress(0, 0, "atomic-habits", "edition-a", 4); await settle();
+  tab.render().saveProgress(0, 0, "atomic-habits", "edition-a", 12); await settle();
+  const cache = JSON.parse(app.storage.get("readlay-v4:github:A"));
+  assert.equal(cache.pending.length, 1);
+  assert.equal(cache.pending[0].action.charOffset, 12);
+  tab.unmount(); tab = app.mount(); await settle();
+  assert.equal(tab.render().getProgress("atomic-habits", "edition-a").charOffset, 12);
+  app.reconnect(); await settle();
+  assert.equal(tab.render().syncStatus, "synced");
+  assert.equal(app.sends.length, 1);
+  assert.equal(app.remotes.get("A").progressByEdition["atomic-habits:edition-a"].charOffset, 12);
+});
+
+test("legacy progress normalises to offset 0 and malformed cached positions are discarded", async (t) => {
+  const app = syncHarness(); t.after(() => app.cleanup());
+  app.storage.set("readlay-v4:guest", JSON.stringify({ base: {
+    ...emptyLibrary(), progressByEdition: {
+      "atomic-habits:edition-a": { chapterIndex: 0, paragraphIndex: 0 },
+      "power-of-now:edition-b": { chapterIndex: 0, paragraphIndex: 0, charOffset: 5, cfi: "epubcfi(/6/2[chapter-1]!/4/2/1:7)" },
+    }, lastReadBookId: "atomic-habits",
+  }, pending: [] }));
+  const guest = app.mount(null); await settle();
+  assert.equal(guest.render().getProgress("atomic-habits", "edition-a").charOffset, 0);
+  assert.equal(guest.render().getProgress("atomic-habits", "edition-a").cfi, "epubcfi(/6/2[chapter-1]!/4/2/1:0)");
+  assert.equal(guest.render().getProgress("power-of-now", "edition-b"), null);
+  guest.render().saveProgress(0, 0, "atomic-habits", "edition-a", -1); await settle();
+  assert.equal(guest.render().getProgress("atomic-habits", "edition-a").charOffset, 0);
+  // Existing callers that only pass chapter and paragraph retain the old behaviour.
+  guest.render().saveProgress(0, 1, "atomic-habits", "edition-a"); await settle();
+  assert.equal(guest.render().getProgress("atomic-habits", "edition-a").charOffset, 0);
 });

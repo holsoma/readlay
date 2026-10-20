@@ -1,213 +1,194 @@
 # Local audiobook preparation
 
-Readlay prepares audio on a local machine with Kokoro, then uploads chapter MP3s to a private Supabase Storage bucket. The website reads prepared metadata and streams existing files. Its normal runtime has no Python, Kokoro, GPU or speech API dependency.
+Readlay prepares audio on a local machine with Kokoro-82M. A separate acoustic model force-aligns the generated speech to the exact spoken transcript. FFmpeg combines cached sentence PCM into chapter Opus files. Private Supabase Storage holds the prepared audio and immutable timing manifests. Normal website operation needs no Python, GPU, model download or speech API.
 
-The default voice is `af_heart`, American English. A British voice can be prepared separately, for example `bf_emma`. These are existing Kokoro voices, not Singaporean English voices. Each narrator has separate audio and timing data. A future engine can implement the local `NarrationProvider` interface and emit the same manifest; its timings must be generated from its own audio.
+The default voice is `af_heart`, American English. British voices such as `bf_emma` are separate narrator renditions. Kokoro does not provide a native Singaporean English voice. Each voice or future engine must produce alignment from its own recording.
 
-## Install local tools once
+## Install once
 
-Use Python 3.12. Kokoro 0.9.4 supports Python 3.10 to 3.13. Keep its packages separate from the website and the system Python installation.
-
-PowerShell, from the repository root:
+Use a separate Python 3.12 environment. In PowerShell from the repository root:
 
 ```powershell
-py -3.12 -m venv .local/audio-venv
-.local/audio-venv/Scripts/python.exe -m pip install -r requirements-audio.txt
-.local/audio-venv/Scripts/python.exe -m spacy download en_core_web_sm
-```
-
-On a machine with `uv` instead of a registered Python installation:
-
-```powershell
-$env:UV_PYTHON_INSTALL_DIR = "$PWD/.local/tooling/python"
-$env:UV_CACHE_DIR = "$PWD/.local/tooling/uv-cache"
-uv python install 3.12
 uv venv --python 3.12 .local/audio-venv
 uv pip install --python .local/audio-venv/Scripts/python.exe -r requirements-audio.txt
 uv pip install --python .local/audio-venv/Scripts/python.exe https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
 ```
 
-Install `ffmpeg` and `ffprobe` and put both on `PATH`. Their build must include the `libmp3lame` encoder. Kokoro uses espeak-ng for English pronunciation fallback. Its current English dependencies include an espeak-ng loader; if that fails on your platform, install espeak-ng using its official platform instructions.
+A registered Python installation can use `py -3.12 -m venv` and that environment's `python -m pip` instead. Install FFmpeg and ffprobe on `PATH`. FFmpeg must include `libopus`; maintaining old MP3 renditions also needs `libmp3lame`.
 
-Dependencies and model weights need an initial download. After that setup, narration runs locally without contacting a speech API. Model files default to `.local/audio-models`; an existing `HF_HOME` environment variable takes precedence. Keep the language package, dependencies and model cache when preparing audio without a network connection.
+The pinned acoustic model is `facebook/wav2vec2-base-960h` at commit `22aad52d435eb6dbaf354bdad9b0da84ce7d6156`, licensed Apache-2.0. Its weights are about 378 MB. The initial setup also downloads Kokoro, the selected voice and language packages. Model assets default to `.local/audio-models`; `HF_HOME` can select another retained cache. On machines where Hugging Face Xet transfer stalls, set `HF_HUB_DISABLE_XET=1` before the initial download.
 
-## Input and permission record
+The normal generation command is offline. `--allow-download` permits a one-off model setup; it does not call an online narration service. Keep the packages and model cache to continue offline.
 
-Use the same structured book JSON as the reader:
+## Source and permission
+
+Use the existing cleaned book JSON in `.local/books`:
 
 ```json
 {
-  "editionId": "edition-v1",
+  "editionId": "exact-reader-edition-id",
   "chapters": [
     { "id": "chapter-1", "title": "First chapter", "paragraphs": ["First paragraph.", "Second paragraph."] }
   ]
 }
 ```
 
-The existing EPUB importer creates this format in `.local/books`. PDF extraction is a separate preparation step: inspect its paragraph order, repeated page headers and footnotes before converting it to this format. The audio command does not attempt to parse PDFs.
+The EPUB importer already produces this structure. Plain UTF-8 `.txt` input is also accepted, with blank lines separating paragraphs. It becomes one chapter; `--title` and `--edition-id` apply only to text input. PDF extraction is a separate preparation step. Review its order, headers and footnotes before supplying structured text.
 
-UTF-8 `.txt` input is also accepted. Blank lines separate paragraphs, and the file becomes one chapter. Use `--title` and optionally `--edition-id`. Use structured reader JSON when preparing audio for the existing catalogue so paragraph indices and edition IDs match exactly.
-
-Generate and distribute only editions for which you have the necessary audio rights. Record an existing permission with `--rights-confirmed`, or pass `--rights-file` containing:
+Generate and distribute only editions with the necessary audio permissions. Record the existing permission with `--rights-confirmed`, or provide `--rights-file` containing:
 
 ```json
-{
-  "bookId": "atomic-habits",
-  "editionId": "the-exact-imported-edition-id",
-  "audioDistributionAllowed": true
-}
+{ "bookId": "atomic-habits", "editionId": "the-exact-edition-id", "audioDistributionAllowed": true }
 ```
 
-The command records this locally in `preparation.json`. It does not verify or grant rights. The uploader refuses files without a matching permission record. Permission records and model caches are private preparation files, excluded from deployment.
+This records the operator's permission statement locally; it does not grant rights. The uploader requires a matching preparation record.
 
-## Inspect, prepare and resume
+## Prepare and resume
 
-A dry run has no model dependencies, network access, audio generation or file writes:
+A dry run needs no models, rights file, dependencies, network access or writes:
 
 ```powershell
-python scripts/generate_audiobook.py .local/books/atomic-habits.json --book-id atomic-habits --chapters 1 --dry-run
+python scripts/generate_audiobook.py .local/books/atomic-habits.json --book-id atomic-habits --chapters 1,2 --dry-run
 ```
 
-Start with the small original test text to download the chosen model and voice once:
+Prepare an original fixture once with model downloads enabled:
 
 ```powershell
-.local/audio-venv/Scripts/python.exe scripts/generate_audiobook.py scripts/audio/tests/fixtures/original-book.json --book-id original-fixture --rights-confirmed --allow-download
+.local/audio-venv/Scripts/python.exe scripts/generate_audiobook.py scripts/audio/tests/fixtures/original-book.json --book-id original-fixture --rights-confirmed --allow-download --bitrate 24k
 ```
 
-Prepare a chapter from a supplied book using only the cached model:
+Then prepare selected book sections offline:
 
 ```powershell
-.local/audio-venv/Scripts/python.exe scripts/generate_audiobook.py .local/books/atomic-habits.json --book-id atomic-habits --chapters 1 --rights-confirmed
+.local/audio-venv/Scripts/python.exe scripts/generate_audiobook.py .local/books/atomic-habits.json --book-id atomic-habits --chapters 1,2 --rights-confirmed --bitrate 24k
 ```
 
-Omit `--chapters` to prepare the full book. Selections such as `--chapters 1,3-5` use one-based chapter numbers. Stored indices use zero-based indices. Run one generation command per book and narrator at a time. CPU is the default; `--device cuda` or `--device mps` is optional on a correctly configured machine.
+Chapter selections are one-based, for example `1,3-5`. Stored indices are zero-based. Omit `--chapters` for a complete book only after checking narration, alignment and available storage. Run one preparation process per book and narrator at a time. CPU is the default; correctly configured machines can use `--device cuda` or `--device mps`.
 
-The default mode sets Hugging Face and Transformers to offline mode and requires cached assets. It checks for the English language package before constructing Kokoro, which prevents its automatic language-package download. `--allow-download` is explicit setup permission for the selected model and voice, not an online narration service.
+Verified sentence WAVs are retained by exact source text, spoken normalisation, Kokoro model/voice hashes and provider versions. Sentence alignment is cached separately by audio SHA256 and every acoustic model and algorithm setting. Changing the aligner reuses existing narration. Model noise is seeded per text chunk. Corrupt caches are detected by hashes and structure checks. There is no expiry or automatic deletion.
 
-Completed paragraph WAVs are cached by exact source-text hash, model and voice hashes, library versions, and chunk settings. Model noise is seeded from each text chunk so rebuilding a cache does not depend on chapter order. Re-running after interruption reuses verified caches. A failed paragraph or chapter is not added to the manifest. Complete chapter entries are saved after each successful encode. Matching partial runs merge coverage; changed source or render settings create a new generation. The encoder version is also included in that generation's settings.
+Completed Opus chapters and exact word cues are verified and reused without narration, alignment or encoding. Matching partial runs merge coverage. Changed source text, voice, acoustic model, chunk settings, bitrate, paragraph gap or encoder creates a different generation path. Older generation files remain available. Do not discard these preparation directories if permanent reuse is required; a free remote storage plan is not a backup guarantee.
 
-Listen to the result before preparing a whole book. Short headings, uncommon names and text containing phonetic symbols can need editorial attention. The script never silently truncates a detected oversized phoneme sequence: lower `--max-chars` if it reports that error.
+## Sentence audio and genuine word alignment
 
-## Paragraph timings and MP3 encoding
+1. Split source paragraphs at sentence boundaries. Adjacent very short complete sentences can share one chunk (a 40-character context target) within the same paragraph, so isolated hesitation words are not narrated or aligned without context. The maximum still applies. Overlong sentences split at whitespace within `--max-chars` (350 by default), retaining every original source offset. Unbroken words over the limit fail instead of being cut.
+2. Build an explicit spoken English transcript. Numerals expand into words, grouped numbers, decimals, ordinals and currency amounts retain their meaning; explicit dictionary syllable middle dots are joined for speech while their original lexical ranges remain separate; supported Latin accents are transliterated, and contractions and hyphenated compounds retain their original source ranges. The exact same spoken text goes to Kokoro and the acoustic aligner. The reader text is unchanged. Unsupported words, ambiguous number formats and mathematical fractions fail instead of receiving invented timings. Write out the intended pronunciation in a reviewed source edition before retrying.
+3. Generate mono signed 16-bit PCM at 24 kHz for each sentence. Cache it as WAV.
+4. Resample each recording with a band-limited 24-to-16 kHz filter. The pinned Wav2Vec2 model calculates frame-level CTC log probabilities from the waveform.
+5. Run a monotonic Viterbi CTC forced alignment over the full transcript, with explicit blank states and repeated-letter constraints. Every source word receives an acoustic interval. There is no proportional timing or paragraph-start fallback. Missing labels, invalid order or low-confidence alignment stop publication. Silent waveforms are rejected; every word must exceed 0.08 mean label confidence, and the sentence mean must exceed 0.20. Cached cues retain and re-check those confidence values.
+6. Map every original lexical word to one cue using UTF-16 offsets, matching browser string offsets. A source token such as `42` has one cue covering its spoken expansion; `3.14` is also one source token covering its spoken decimal expansion. Word text is not copied into public manifests.
+7. Concatenate sentence PCM once in source order and encode each chapter to Ogg Opus with FFmpeg `libopus`. The default is 24 kbit/s mono speech; 32 kbit/s and higher rates can be selected for a separate rendition. The optional paragraph pause (300 ms by default) belongs to the preceding paragraph interval. No pause is added between sentence chunks. FFmpeg bit-exact muxing settings make the same recording reproducible with the same encoder build.
+8. Offset every sentence's word times by integer preceding PCM sample counts. ffprobe must report a chapter duration within 50 ms of that timeline before activation. The Opus pre-skip is handled by its container; player times follow the decoded media timeline.
 
-1. Each original paragraph is narrated separately. Long paragraphs are split at sentence or word boundaries, with a hard limit for unbroken text. Those internal chunks retain a single paragraph cue.
-2. Every model output becomes mono signed 16-bit PCM at 24,000 samples per second. Only a model chunk needs to fit in memory.
-3. Paragraph PCM is cached as WAV. Chapter preparation streams those files into one ffmpeg encoder, in source order.
-4. A deterministic 300 ms pause follows each paragraph except the final one. `--paragraph-gap-ms` can change this. The pause belongs to the preceding paragraph's interval, so there are no gaps in the synchronisation timeline.
-5. Paragraph start and end positions come from integer PCM sample counts. Each chapter is encoded once to MP3, avoiding accumulated padding from concatenated paragraph MP3s. A Xing header supports seeking and gapless decoding.
-6. ffprobe checks the chapter duration. A difference above 0.20 seconds between the PCM timeline and MP3 container duration stops publication. MP3 encoder delay is one chapter-level effect; browser seeking is still limited by MP3 decoding and the browser's seek precision.
+These are acoustic estimates at the model's 20 ms frame stride, not a promise of zero-millisecond accuracy. Names, unusual numbers and abbreviations still need a listening check. Force alignment can fail on poor source text or speech. Review the source or pronunciation before retrying; do not replace a failure with estimated word timestamps. CTC confidence checks reject obvious bad paths but cannot prove pronunciation quality.
 
-Speech is prepared at its normal speed. The website changes its audio element's `playbackRate` to 0.75, 1, 1.25, 1.5, 1.75 or 2. Cue timestamps remain in the underlying recording's time, so no regenerated files are needed.
+## Real EPUB CFI locations
 
-Paragraph intervals cover the whole chapter. Reading to listening seeks to the paragraph start. Listening to reading finds the interval containing the playback time. A pause between paragraphs returns the preceding paragraph; the exact boundary starts the next paragraph. Sentence or word cues can later be added as nested segment information without changing the source paragraph IDs.
+Preparation creates a deterministic private `canonical.epub` from the exact cleaned reader text. It is a derivative EPUB, not the original supplied EPUB. Its package contains metadata, manifest and spine in that order. Every chapter XHTML has a head followed by a body containing only paragraph elements; every paragraph contains one original source text node.
+
+A cue CFI is therefore literal:
+
+```text
+epubcfi(/6/<2*(chapterIndex+1)>[chapter-<chapterIndex+1>]!/4/<2*(paragraphIndex+1)>/1:<UTF16 charStart>)
+```
+
+The location scheme is `readlay-canonical-epub-v1`. Both the actual EPUB structure and the unchanged source text support those offsets. Never attach these CFIs to the original EPUB, whose wrappers, images and removed material differ. The canonical EPUB stays in private local preparation; no new public EPUB download is added.
 
 ## Files and manifest
 
 ```text
 .local/audiobooks/<bookId>/<editionId>/<narratorId>/
   manifest.json
-  published.json             # Only after matching files and metadata upload
+  published.json
   <generationId>/
+    canonical.epub
     manifest.json
     preparation.json
-    chapter-0001.mp3
-    chapter-0002.mp3
-    upload-receipt.json       # Only after every selected object uploads
+    chapter-0001.opus
+    chapter-0002.opus
+    upload-receipt.json
+.local/audio-cache/sentences/<prefix>/
+  <audioCacheKey>.wav
+  <audioCacheKey>.json
+  <audioCacheKey>.<alignmentKey>.alignment.json
 ```
 
-The short generation ID derives from source text, actual model and voice hashes, preparation version and settings. A changed rendition uses a separate object path. The active local manifest is replaced atomically, while older generation files remain available for rollback.
+Schema v2 includes `alignment: "word"`, `format: "opus"`, `sampleRate: 24000`, narrator, source edition, coverage and canonical EPUB hash. Each chapter contains `byteLength`, audio SHA256, sample-derived paragraph segments, optional sentence cues, and `words` with `paragraphIndex`, `charStart`, `charEnd`, `startSeconds`, `endSeconds` and `cfi`. Publication requires exact coverage of every source lexical word, matching paragraph hashes, monotonic valid timestamps and canonical CFIs.
 
-The manifest contains:
+The website changes `HTMLMediaElement.playbackRate` for 0.75, 1, 1.25, 1.5, 1.75 and 2. No audio is regenerated. Reading to listening uses the selected source word's cue. Listening to reading uses the current audio word cue and the same shared location. The browser cannot infer a silent reader's eye position; selecting or setting the current word supplies that location.
 
-- Book and edition IDs, narrator ID, display name, engine, voice and language.
-- `schemaVersion: 1`, `alignment: "paragraph"`, `sampleRate: 24000` and `generationId`.
-- `coverage: {complete, totalChapters, chapterIndices}`. Complete means every chapter present in the imported source is narrated. It does not certify that the source edition itself is complete. Partial runs keep their explicit chapter coverage.
-- Original chapter indices, IDs and titles, MP3 object paths and durations.
-- Paragraph indices, start/end seconds, exact integer `startSample`/`endSample`, and the SHA256 of each exact original UTF-8 paragraph.
-- The SHA256 of each MP3 and its probed container duration.
+Existing schema v1 paragraph-aligned MP3 uploads remain supported. Use `--legacy-paragraph-mp3` only when maintaining them. They remain labelled paragraph alignment and must never be described as exact word synchronisation.
 
-The manifest does not contain paragraph text. Changes to imported text require a matching edition and new narration; never attach old timings to new text. The website validates hashes and chapter IDs before offering audio.
+## Private Supabase upload
 
-## Upload to private Supabase Storage
+Keep the existing private bucket. It must allow `audio/ogg` and `application/json`, plus `audio/mpeg` for legacy assets. Adding a MIME type must not make the bucket public. No Cloudflare account or paid speech service is required.
 
-Set these variables in the local process through a secret manager or your normal local environment. Do not place their values in command history or commit them:
+Provide process environment variables through the existing secret configuration:
 
 ```text
 SUPABASE_URL=https://<project>.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=<server-only sb_secret_ key or legacy service_role JWT>
+SUPABASE_SERVICE_ROLE_KEY=<server-only key>
 AUDIO_STORAGE_BUCKET=readlay-audio
 ```
 
-The variable `SUPABASE_SERVICE_ROLE_KEY` accepts either a new `sb_secret_` key or a legacy `service_role` JWT. The new secret key is preferred. Opaque `sb_secret_` keys go only in the `apikey` header; legacy JWTs also use `Authorization: Bearer`. New secret keys are not JWT bearer tokens. Both key types belong only in trusted local preparation and server environments, never in a browser bundle or a `NEXT_PUBLIC_` variable.
+New `sb_secret_` keys are sent in the `apikey` header, never as JWT bearer tokens. Legacy service-role JWTs also use the bearer header. Neither key belongs in a client bundle or `NEXT_PUBLIC_` variable. The uploader reads its process environment and does not load `.env.local` itself. The existing `scripts/audio/configure_storage.mjs` helper validates and uploads only approved storage settings to the existing Vercel project without printing secret values.
 
-Initialise this workspace's approved Readlay project settings without showing or changing existing auth and database values:
-
-```powershell
-node scripts/audio/configure_storage.mjs --initialise
-```
-
-Add the server-only key from the approved project's Dashboard to the blank `SUPABASE_SERVICE_ROLE_KEY` field in ignored `.env.local`. The helper preserves an existing key. Check the four storage settings, then upload only those values to the existing `holsoma/readlay` Vercel project:
-
-```powershell
-node --env-file-if-exists=.env.local scripts/audio/configure_storage.mjs --check
-node --env-file-if-exists=.env.local scripts/audio/configure_storage.mjs
-```
-
-The helper passes values to the Vercel CLI through stdin, removes app credentials from the child environment, and discards CLI output to prevent credential leakage. It uploads to production and preview without redeploying. The actual audiobook upload command below reads process environment variables directly and does not load `.env.local` automatically.
-
-Validate files without reading credentials or contacting storage:
+Validate locally first:
 
 ```powershell
 python scripts/upload_audiobook.py .local/audiobooks/atomic-habits/<editionId>/kokoro-af_heart/manifest.json --allow-partial --dry-run
 ```
 
-Upload a complete book:
+Upload using the same path after credentials are present:
 
 ```powershell
-python scripts/upload_audiobook.py .local/audiobooks/atomic-habits/<editionId>/kokoro-af_heart/manifest.json --create-bucket
+python scripts/upload_audiobook.py .local/audiobooks/atomic-habits/<editionId>/kokoro-af_heart/manifest.json --allow-partial
 ```
 
-`--create-bucket` creates a missing bucket as private. An existing public bucket is rejected. A partial book requires the explicit `--allow-partial` flag. The command validates the generation record, source identity, object paths, chapter coverage and every local MP3 hash before making any request.
+`--allow-partial` explicitly acknowledges incomplete audio coverage; omit it for a complete book. `--create-bucket` creates a missing bucket as private. Existing public buckets are rejected.
 
-Files up to 6 MiB use a standard streaming upload. Larger files use Supabase's resumable TUS endpoint with 6 MiB chunks. Private upload state allows the same command to resume after interruption; expired sessions start again. No request enables overwriting. If an object already exists, the command streams and verifies its SHA256 before reusing it. A different object at the same path stops the upload. Bucket and account size limits still apply; a storage failure reports the HTTP status and leaves completed objects intact.
+Before upload, the command verifies preparation rights, generation paths, source hashes, actual canonical EPUB structure, word coverage, CFIs, byte lengths and audio hashes. Files up to 6 MiB use standard upload; larger files use resumable TUS with 6 MiB chunks. Existing objects are downloaded and SHA256 checked before reuse. Requests never enable overwrite. Every uploaded chapter and immutable hash-named manifest is downloaded and SHA256 checked before `published.json` activates the generation. Interrupted uploads retain completed objects and resumable state.
 
-After every chapter in the manifest uploads, the command uploads the manifest itself under a name containing its SHA256. This keeps partial and complete metadata immutable even when chapter coverage grows. It then writes `upload-receipt.json` and a matching `published.json` beside the selected local manifest. The activation marker records the exact manifest hash, generation, storage origin, bucket and upload time. Failed uploads do not activate a new manifest.
+Deploy matching base `manifest.json` and `published.json` only after that verification. Audio, canonical EPUBs, sentence caches, alignment models, Python environments and preparation records stay out of Next.js. Authenticated server routes authorise the reader and return short-lived private chapter URLs. Local preview mode is explicitly separate and unavailable on Vercel.
 
-Deploy the matching local `manifest.json` and `published.json` with Readlay only after that success. Supabase mode requires this marker to match. MP3s stay in storage; do not package them, WAV caches, model weights, Python environments or preparation records into the Next.js deployment. The website authorises GitHub users and issues short-lived URLs for the private chapter files. For a local preview, `AUDIO_STORAGE_MODE=local` may serve prepared files through authenticated local routes without an upload marker. That mode is not used on Vercel.
+Local generation removes speech API costs. Supabase storage and transfer have finite free allowances. At a nominal 24 kbit/s, audio is roughly 10.8 MB per hour; 48 kbit/s is roughly 21.6 MB per hour. Opus variable bitrate, container overhead, pauses, metadata and additional narrators change the total. Supabase Free currently includes 1 GB of storage, shared with other stored assets. Estimate actual chapter bytes and full-book duration before a large upload, and stop when the free allowance is insufficient. The full catalogue is not guaranteed to fit. Do not enable a paid plan as an automatic fallback.
 
-Storage and transfer quotas are separate from narration. Local Kokoro removes speech API charges; storage and bandwidth can exceed a provider's free allowance as usage grows.
-
-## Tests
+## Verification
 
 ```powershell
-python -m unittest discover -s scripts/audio/tests -v
+.local/audio-venv/Scripts/python.exe -m unittest discover -s scripts/audio/tests -p 'test_*.py' -v
 node --test scripts/audio/tests/configure_storage.test.mjs
 ```
 
-Tests use original fixture text and a deterministic test provider, without model dependencies or network requests. They exercise real MP3 encoding when ffmpeg and ffprobe are installed, exact sample offsets, paragraph gaps, cache recovery, rights records, partial coverage, immutable paths and upload safety checks. They do not prove narration quality. Keep the small Kokoro fixture smoke test and a listening check as separate setup checks.
+The Python suite retains legacy MP3 checks and adds Unicode UTF-16 ranges, apostrophes, hyphens, numerals, emoji, real canonical EPUB structure, unequal acoustic CTC peaks, repeated letters, sentence and alignment cache reuse, fail-closed missing words, real FFmpeg Opus generation, partial resume and upload validation. Controlled test alignments are test fixtures only. A real model smoke test and browser playback checks remain separate acceptance steps. Restricted Windows sandboxes can set `TMP` and `TEMP` to an ignored workspace folder.
 
-On a restricted Windows environment whose default temporary folder is not writable, set `TMP` and `TEMP` to an ignored workspace folder before running the tests.
+The earlier deployed generation `07aa774d7336710f2a036e6d` is a legacy paragraph MP3 for Atomic Habits' opening section. It remains available at its immutable storage path. A v2 generation has a different generation ID and does not overwrite that recording.
 
-### Verified setup on 21 October 2026
+## Verified preparation on 21 October 2026
 
-The isolated workspace environment used Python 3.12.13, Kokoro 0.9.4, Misaki 0.9.4, PyTorch 2.14.1, spaCy 3.8.16 and `en_core_web_sm` 3.8.0, with the `af_heart` voice and CPU inference. The 17 dependency-free pipeline and upload tests passed, including real ffmpeg chapter encoding and both API-key header formats. The six Node storage-configuration tests also passed, including whitespace-formatted key assignments and secret-safe Vercel upload behaviour.
+The pinned acoustic model's 377,607,901-byte weight file matched its official SHA256 before use. Real offline Kokoro and CTC preparation then completed Atomic Habits' opening section and full introduction for source edition `f499e538de3e7e0a`. The active v2 generation is `80d7201c2f4fd2e734d43393`, using `af_heart` and 24 kbit/s mono Opus.
 
-The original fixture was narrated with a one-off model download enabled. Its two MP3 chapters were 10.75 seconds and 4.85 seconds, with three paragraph cues and 126,234 bytes of audio in total. Preparation took 5.9 seconds after model loading.
+| Section | Paragraphs | Word cues | PCM duration | Encoded bytes | Minimum word confidence |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Opening | 7 | 42 | 22.425 s | 56,137 | 0.499792 |
+| Introduction | 53 | 3,082 | 1,117.950 s | 3,149,617 | 0.304721 |
+| Total | 60 | 3,124 | 1,140.375 s | 3,205,754 | |
 
-After the text cleanup stabilised at parser `readlay-text-v4`, Atomic Habits chapter 1 was prepared again using default offline settings and the cached model. The current source edition is `f499e538de3e7e0a`, with 28 sections, 2,331 paragraphs and 77,553 words. The chapter MP3 is 24.275 seconds and 194,925 bytes, with all seven source paragraphs mapped to consecutive audio intervals. Preparation took 1.0 second after model loading, reusing the verified paragraph caches. Its manifest records `complete: false`, `totalChapters: 28` and `chapterIndices: [0]`. The remaining chapters were not generated.
+The introduction includes long paragraphs and mid-paragraph source positions. Its mean word confidence was 0.978332. No confidence gate was weakened to produce these files. Context grouping resolved isolated hesitation utterances, and abbreviation handling kept author initials with their names. The source reader text and UTF-16 locations were unchanged.
 
-The current manifest is `.local/audiobooks/atomic-habits/f499e538de3e7e0a/kokoro-af_heart/manifest.json`, with generation ID `07aa774d7336710f2a036e6d`. Verification checked all seven exact source-text SHA256 hashes, the chapter ID, consecutive integer sample offsets, second values derived from those offsets, the final chapter duration and the MP3 SHA256. The encoded duration also measured 24.275 seconds.
+The final preparation run reused retained sentence caches and took 71.813 seconds including model loading. An identical offline rerun took 12.172 seconds including model loading, with 0.2 seconds of chapter verification. It reused both completed chapters without narration, acoustic alignment or encoding. All sentence WAV, cached alignment and chapter Opus hashes and modification times remained unchanged. The local acceptance record is `.local/word-audio-acceptance.json`.
 
-Both manifests passed the uploader's local dry-run validation. The original fixture remains local and is not a catalogue book.
+The opening Opus SHA256 is `3e2e0a164e417501a769ecf43934e7c2803f79a3d09a9a19f343b8b5bf16dc59`; the introduction hash is `27558ff19a79605735e981601ee17466a8bc3f61a11e230207f4cc2f43dae875`. Coverage remains explicitly incomplete at 2 of 28 sections. The remaining sections and other books were not generated in this acceptance run. These local checks prove preparation and cache reuse; publication and browser playback are separate deployment checks.
 
-The approved Supabase project `readlay` was created in organisation `holsoma`, in Singapore (`ap-southeast-1`), after the provider quoted $0 per month. Its project reference is `tgxmdccqlbyevpjhthxv`. The private `readlay-audio` bucket contains only the current Atomic Habits chapter 1 MP3 and its immutable manifest. Both remote files were downloaded through authenticated requests and their SHA256 hashes matched the local preparation files. The new server-only `sb_secret_` key worked using the `apikey` header without a bearer token.
-
-The matching local `published.json` activation marker was written and verified. Its manifest hash is `65b2aeca60ae0bd7625228641fdff982ef4d9de93097101cc81bf48b3c88f138`; the MP3 hash is `0c8cc9c033f1eda6d14d2e3ab0f3915f5a8897ac5db1e0b8ba8f4fbdb19d4324`. The remaining 27 chapters were not generated or uploaded. The four storage environment values were securely uploaded to the existing `holsoma/readlay` Vercel production and preview environments. Metadata checks confirmed all four variable names in both environments without retrieving values. Auth and database variables were unchanged, and this setup did not redeploy the website. A non-secret setup and cost record is stored in ignored `.local/audio-setup.json`. These storage checks do not prove browser playback.
+All 28 Python pipeline/upload tests passed, including real Opus encoding, legacy MP3 behaviour, model-independent CTC path checks, exact source/CFI validation, silence and uniform-emission rejection, cached-confidence checks and unchanged-output resume.
 
 ## Primary references
 
-- [Official Kokoro repository and Python usage](https://github.com/hexgrad/kokoro)
 - [Kokoro model and licence](https://huggingface.co/hexgrad/Kokoro-82M)
-- [Official voice catalogue](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md)
-- [Supabase standard uploads](https://supabase.com/docs/guides/storage/uploads/standard-uploads)
+- [Official Kokoro Python package](https://github.com/hexgrad/kokoro)
+- [Pinned English acoustic model, Apache-2.0](https://huggingface.co/facebook/wav2vec2-base-960h/tree/22aad52d435eb6dbaf354bdad9b0da84ce7d6156)
+- [CTC forced alignment principles](https://docs.pytorch.org/audio/stable/tutorials/forced_alignment_tutorial.html). The deprecated TorchAudio helper APIs are not used.
+- [EPUB CFI specification](https://w3c.github.io/epub-specs/epub33/epubcfi/index.html)
+- [FFmpeg Opus encoder](https://ffmpeg.org/ffmpeg-codecs.html#libopus)
+- [Supabase pricing and free storage allowance](https://supabase.com/pricing)
 - [Supabase resumable uploads](https://supabase.com/docs/guides/storage/uploads/resumable-uploads)

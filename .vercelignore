@@ -15,8 +15,14 @@ scripts/__pycache__
 .local/audio-venv
 .local/audio-cache
 .local/audio-models
+.local/verification-runtime
+.local/*.mjs
+.local/*.py
+.local/*.log
 .local/**/*.wav
 .local/**/*.mp3
+.local/**/*.opus
+.local/**/*.epub
 .agents
 .codex
 .aws

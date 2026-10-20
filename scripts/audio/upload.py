@@ -61,13 +61,13 @@ class SupabaseStorage:
             connection.close()
             raise PreparationError("Storage could not be reached. Check network access, then run the upload command again.") from error
 
-    def require_private_bucket(self, create: bool = False) -> None:
+    def require_private_bucket(self, create: bool = False, content_types: tuple[str, ...] = ("audio/mpeg", "application/json")) -> None:
         connection, response = self._request("GET", "/storage/v1/bucket/" + quote(self.bucket, safe=""))
         status = response.status
         payload = response.read(128 * 1024)
         connection.close()
         if is_missing(status, payload) and create:
-            body = json.dumps({"id": self.bucket, "name": self.bucket, "public": False, "allowed_mime_types": ["audio/mpeg", "application/json"]}).encode()
+            body = json.dumps({"id": self.bucket, "name": self.bucket, "public": False, "allowed_mime_types": list(content_types)}).encode()
             connection, response = self._request("POST", "/storage/v1/bucket", body, {"Content-Type": "application/json", "Content-Length": str(len(body))})
             status = response.status
             response.read(128 * 1024)
@@ -84,8 +84,8 @@ class SupabaseStorage:
         if not isinstance(bucket, dict) or bucket.get("public") is not False:
             raise PreparationError("The audiobook bucket must be private. This command will not publish to a public bucket.")
         allowed_types = bucket.get("allowed_mime_types")
-        if isinstance(allowed_types, list) and not all(mime in allowed_types or mime.split("/")[0] + "/*" in allowed_types or "*/*" in allowed_types for mime in ("audio/mpeg", "application/json")):
-            raise PreparationError("The private bucket must allow both audio/mpeg and application/json uploads. Update its MIME type settings first.")
+        if isinstance(allowed_types, list) and not all(mime in allowed_types or mime.split("/")[0] + "/*" in allowed_types or "*/*" in allowed_types for mime in content_types):
+            raise PreparationError("The private bucket must allow " + ", ".join(content_types) + ". Update its MIME type settings first; keep the bucket private.")
 
     def _existing_matches(self, object_path: str, expected_hash: str) -> bool:
         connection, response = self._request("GET", "/storage/v1/object/authenticated/" + quote(self.bucket, safe="") + "/" + quote(object_path, safe="/"))
@@ -199,8 +199,10 @@ def upload_plan(manifest_path: Path, output_root: Path) -> tuple[dict, list[tupl
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         raise PreparationError("The manifest must be readable JSON.") from error
-    if not isinstance(manifest, dict) or manifest.get("schemaVersion") != 1 or manifest.get("alignment") != "paragraph" or manifest.get("sampleRate") != 24000:
-        raise PreparationError("The manifest is not a supported paragraph-aligned audiobook.")
+    legacy = isinstance(manifest, dict) and manifest.get("schemaVersion") == 1 and manifest.get("alignment") == "paragraph"
+    word_audio = isinstance(manifest, dict) and manifest.get("schemaVersion") == 2 and manifest.get("alignment") == "word" and manifest.get("format") == "opus" and manifest.get("locationScheme") == "readlay-canonical-epub-v1"
+    if not (legacy or word_audio) or manifest.get("sampleRate") != 24000:
+        raise PreparationError("The manifest is not a supported paragraph MP3 or word-aligned Opus audiobook.")
     book_id = identifier(manifest.get("bookId", ""), "bookId")
     edition_id = identifier(manifest.get("editionId", ""), "editionId")
     narrator = manifest.get("narrator")
@@ -230,19 +232,67 @@ def upload_plan(manifest_path: Path, output_root: Path) -> tuple[dict, list[tupl
         if index in seen:
             raise PreparationError("The manifest repeats a chapter index.")
         seen.add(index)
-        expected_path = "/".join((book_id, edition_id, narrator_id, generation_id, f"chapter-{index + 1:04d}.mp3"))
+        extension = "opus" if word_audio else "mp3"
+        expected_path = "/".join((book_id, edition_id, narrator_id, generation_id, f"chapter-{index + 1:04d}.{extension}"))
         if chapter.get("audioPath") != expected_path:
             raise PreparationError("An audio path does not match the declared book, edition and generation.")
         local_path = child_path(output_root, *expected_path.split("/"))
         if not local_path.is_file() or not local_path.stat().st_size:
-            raise PreparationError("A chapter MP3 is missing or empty.")
+            raise PreparationError("A chapter audio file is missing or empty.")
         digest = file_digest(local_path)
         if chapter.get("audioSha256") != digest:
-            raise PreparationError("A chapter MP3 has changed since its manifest was generated. Generate it again before uploading.")
+            raise PreparationError("A chapter audio file has changed since its manifest was generated. Generate it again before uploading.")
+        if word_audio and chapter.get("byteLength") != local_path.stat().st_size:
+            raise PreparationError("A chapter byte length differs from its manifest.")
         plan.append((local_path, expected_path, digest))
     coverage = manifest.get("coverage", {})
     if not isinstance(coverage, dict) or coverage.get("chapterIndices") != sorted(seen) or type(coverage.get("totalChapters")) is not int or not 1 <= coverage["totalChapters"] or max(seen) >= coverage["totalChapters"]:
         raise PreparationError("The manifest chapter coverage is invalid.")
     if coverage.get("complete") is not (sorted(seen) == list(range(coverage["totalChapters"]))):
         raise PreparationError("The manifest incorrectly labels its chapter coverage.")
+    if word_audio:
+        validate_word_assets(manifest, generation_base)
     return manifest, plan, generation_base
+
+
+def validate_word_assets(manifest: dict, generation_base: Path) -> None:
+    """Check the real canonical EPUB and every exact word range before upload."""
+    import zipfile
+    import xml.etree.ElementTree as ET
+    from .locations import canonical_cfi, source_words
+    from .core import digest_text
+    from .word_pipeline import valid_words
+    canonical = manifest.get("canonicalEpub", {})
+    prefix = "/".join((manifest["bookId"], manifest["editionId"], manifest["narrator"]["id"], manifest["generationId"]))
+    path = generation_base / "canonical.epub"
+    if not isinstance(canonical, dict) or canonical.get("path") != prefix + "/canonical.epub" or not path.is_file() or canonical.get("sha256") != file_digest(path):
+        raise PreparationError("The exact canonical EPUB is missing or changed. Its CFI mapping cannot be verified.")
+    ns = {"x": "http://www.w3.org/1999/xhtml"}
+    try:
+        with zipfile.ZipFile(path) as archive:
+            for chapter in manifest["chapters"]:
+                index = chapter["chapterIndex"]
+                document = ET.fromstring(archive.read(f"EPUB/chapter-{index + 1}.xhtml"))
+                body = document.find("x:body", ns)
+                if body is None or any(element.tag != "{" + ns["x"] + "}p" or len(element) for element in body):
+                    raise PreparationError("The canonical EPUB no longer has one source text node per paragraph.")
+                paragraphs = [element.text or "" for element in body]
+                if len(chapter.get("segments", [])) != len(paragraphs):
+                    raise PreparationError("Paragraph cues do not match the canonical EPUB.")
+                all_words = chapter.get("words", [])
+                previous_end = 0.0
+                for paragraph_index, text in enumerate(paragraphs):
+                    segment = chapter["segments"][paragraph_index]
+                    if segment.get("paragraphIndex") != paragraph_index or segment.get("textHash") != digest_text(text):
+                        raise PreparationError("A paragraph hash differs from the canonical EPUB.")
+                    words = [word for word in all_words if word.get("paragraphIndex") == paragraph_index]
+                    if not valid_words(words, source_words(text), chapter["durationSeconds"]):
+                        raise PreparationError("Word timings do not cover the canonical source words exactly.")
+                    for word in words:
+                        if word.get("cfi") != canonical_cfi(index, paragraph_index, word["charStart"]) or word["startSeconds"] < previous_end:
+                            raise PreparationError("A word CFI or monotonic audio timestamp is invalid.")
+                        previous_end = word["endSeconds"]
+                if len(all_words) != sum(len(source_words(text)) for text in paragraphs):
+                    raise PreparationError("The manifest contains extra or missing source word cues.")
+    except (zipfile.BadZipFile, ET.ParseError, KeyError, TypeError, ValueError, OSError) as error:
+        raise PreparationError("The canonical EPUB or word timing data could not be verified.") from error

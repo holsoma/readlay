@@ -5,6 +5,7 @@ import path from "node:path";
 import { books } from "@/data/books";
 import { getBookContent } from "@/lib/book-content";
 import { parseAudioManifest, type AudioManifest, type AudioNarratorSummary } from "@/lib/audio-types";
+import { cfiForPosition, isTextBoundary, wordsInText } from "@/lib/epub-location";
 
 const safeId = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
 const root = path.join(process.cwd(), ".local", "audiobooks");
@@ -22,7 +23,27 @@ function editionFor(bookId: string) {
   return book.editionId;
 }
 
+// Vercel's traced preparation files are immutable for this deployment. Retain at
+// most two validated manifests per process, rather than hashing a whole book on
+// every seek. Local preparation remains uncached so operator edits are visible.
+const validatedManifests = new Map<string, Promise<AudioManifest>>();
 export async function getAudioManifest(bookId: string, narratorId: string): Promise<AudioManifest> {
+  if (process.env.VERCEL !== "1") return loadAudioManifest(bookId, narratorId);
+  const key = JSON.stringify([bookId, narratorId, process.env.SUPABASE_URL, process.env.AUDIO_STORAGE_BUCKET]);
+  const existing = validatedManifests.get(key);
+  if (existing) {
+    validatedManifests.delete(key);
+    validatedManifests.set(key, existing);
+    return existing;
+  }
+  const result = loadAudioManifest(bookId, narratorId);
+  validatedManifests.set(key, result);
+  if (validatedManifests.size > 2) validatedManifests.delete(validatedManifests.keys().next().value!);
+  try { return await result; }
+  catch (error) { if (validatedManifests.get(key) === result) validatedManifests.delete(key); throw error; }
+}
+
+async function loadAudioManifest(bookId: string, narratorId: string): Promise<AudioManifest> {
   const editionId = editionFor(bookId);
   if (!safeId.test(narratorId)) throw new AudioError(400, "Invalid narrator.");
   let value: unknown;
@@ -56,7 +77,7 @@ export async function getAudioManifest(bookId: string, narratorId: string): Prom
   for (const chapter of manifest.chapters) {
     const source = content.chapters[chapter.chapterIndex];
     if (!source || chapter.chapterId !== source.id || chapter.segments.length !== source.paragraphs.length ||
-      !chapter.audioPath.startsWith(prefix) || !/^chapter-\d{4,6}\.mp3$/.test(chapter.audioPath.slice(prefix.length))) {
+      !chapter.audioPath.startsWith(prefix) || !(manifest.schemaVersion === 2 ? /^chapter-\d{4,6}\.opus$/ : /^chapter-\d{4,6}\.mp3$/).test(chapter.audioPath.slice(prefix.length))) {
       throw new AudioError(503, "The narration does not match this edition.");
     }
     for (let index = 0; index < chapter.segments.length; index++) {
@@ -65,6 +86,20 @@ export async function getAudioManifest(bookId: string, narratorId: string): Prom
       if (segment.paragraphIndex !== index || segment.textHash !== textHash) {
         throw new AudioError(503, "The narration does not match this edition.");
       }
+    }
+    if (manifest.alignment === "word") {
+      let wordIndex = 0;
+      for (const [paragraphIndex, paragraph] of source.paragraphs.entries()) {
+        for (const expected of wordsInText(paragraph)) {
+          const word = chapter.words?.[wordIndex++];
+          if (!word || word.paragraphIndex !== paragraphIndex || word.charStart !== expected.charStart || word.charEnd !== expected.charEnd ||
+            !isTextBoundary(paragraph, word.charStart) || !isTextBoundary(paragraph, word.charEnd) ||
+            word.cfi !== cfiForPosition(chapter.chapterIndex, paragraphIndex, expected.charStart)) {
+            throw new AudioError(503, "The word timings do not match this edition.");
+          }
+        }
+      }
+      if (wordIndex !== chapter.words?.length) throw new AudioError(503, "The word timings do not match this edition.");
     }
   }
   return manifest;

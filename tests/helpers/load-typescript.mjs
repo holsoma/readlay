@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import vm from "node:vm";
 import ts from "typescript";
@@ -21,7 +21,12 @@ export function loadTypeScript(path, { stubs = {}, globals = {}, extra = "", env
   vm.runInNewContext(source, {
     module: compiledModule,
     exports: compiledModule.exports,
-    require: (id) => Object.hasOwn(stubs, id) ? stubs[id] : require(id),
+    require: (id) => {
+      if (Object.hasOwn(stubs, id)) return stubs[id];
+      const local = id.startsWith("@/") ? new URL(`src/${id.slice(2)}.ts`, root)
+        : id.startsWith(".") ? new URL(`${id}.ts`, filename) : null;
+      return local && existsSync(local) ? loadTypeScript(local.href, { stubs, globals, env }) : require(id);
+    },
     process: { env },
     URL,
     Request,

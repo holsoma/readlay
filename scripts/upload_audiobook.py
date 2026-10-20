@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Upload prepared MP3s to a private Supabase bucket. Never uploads source text."""
+"""Upload prepared Opus or legacy MP3 assets to private Supabase Storage."""
 
 from __future__ import annotations
 
@@ -31,24 +31,33 @@ def main(argv: list[str] | None = None) -> int:
             raise PreparationError("The local manifest changed while it was being checked. Run the command again.")
         if not manifest["coverage"]["complete"] and not args.allow_partial:
             raise PreparationError("This audiobook is incomplete. Finish the remaining chapters or use --allow-partial for a deliberate preview.")
-        print(f"Validated {len(plan)} chapter MP3 files ({sum(path.stat().st_size for path, _, _ in plan):,} bytes).")
+        print(f"Validated {len(plan)} chapter audio files ({sum(path.stat().st_size for path, _, _ in plan):,} bytes).")
         if args.dry_run:
             print("Dry run complete. No credentials read and no network requests made.")
             return 0
         storage = SupabaseStorage(os.environ.get("SUPABASE_URL", ""), os.environ.get("SUPABASE_SERVICE_ROLE_KEY", ""), os.environ.get("AUDIO_STORAGE_BUCKET", "readlay-audio"))
-        storage.require_private_bucket(args.create_bucket)
+        opus = manifest.get("schemaVersion") == 2
+        content_type = "audio/ogg" if opus else "audio/mpeg"
+        storage.require_private_bucket(args.create_bucket, (content_type, "application/json"))
         for index, (path, object_path, digest) in enumerate(plan):
             print(f"Uploading chapter {index + 1}/{len(plan)} ({path.stat().st_size:,} bytes).", flush=True)
             if file_digest(path) != digest:
-                raise PreparationError("A chapter MP3 changed after validation. Run the command again before deploying.")
-            storage.upload(path, object_path, digest, generation_base / ".upload-state.json")
+                raise PreparationError("A chapter audio file changed after validation. Run the command again before deploying.")
+            if opus:
+                storage.upload(path, object_path, digest, generation_base / ".upload-state.json", content_type)
+            else:
+                storage.upload(path, object_path, digest, generation_base / ".upload-state.json")
             if file_digest(path) != digest:
-                raise PreparationError("A chapter MP3 changed during upload. The manifest was not activated.")
+                raise PreparationError("A chapter audio file changed during upload. The manifest was not activated.")
+            if not storage._existing_matches(object_path, digest):
+                raise PreparationError("Storage did not return the uploaded chapter for SHA256 verification. The manifest was not activated.")
         manifest_hash = initial_manifest_hash
         if file_digest(args.manifest) != manifest_hash:
             raise PreparationError("The local manifest changed during upload. Run the command again before deploying it.")
         remote_manifest = "/".join((manifest["bookId"], manifest["editionId"], manifest["narrator"]["id"], manifest["generationId"], f"manifest-{manifest_hash}.json"))
         storage.upload(args.manifest, remote_manifest, manifest_hash, generation_base / ".upload-state.json", "application/json")
+        if not storage._existing_matches(remote_manifest, manifest_hash):
+            raise PreparationError("Storage did not return the uploaded manifest for SHA256 verification. It was not activated.")
         # Do not activate a manifest that was changed by another preparation process mid-upload.
         if file_digest(args.manifest) != manifest_hash:
             raise PreparationError("The local manifest changed during upload. Run the command again before deploying it.")

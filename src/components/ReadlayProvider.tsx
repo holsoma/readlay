@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { SessionProvider, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { books } from "@/data/books";
+import { cfiForPosition, parseEpubCfi } from "@/lib/epub-location";
 import type { LibraryAction, LibraryState, ReadingProgress, SavedPassage } from "@/lib/library-types";
 
 export type { ReadingProgress, SavedPassage } from "@/lib/library-types";
@@ -16,7 +17,7 @@ type ReadlayContextValue = LibraryState & {
   syncStatus: SyncStatus;
   toggleSaved: (id: string) => void;
   getProgress: (bookId: string, editionId?: string) => ReadingProgress | null;
-  saveProgress: (chapterIndex: number, paragraphIndex: number, bookId: string, editionId: string) => void;
+  saveProgress: (chapterIndex: number, paragraphIndex: number, bookId: string, editionId: string, charOffset?: number) => void;
   toggleBookmark: (chapterIndex: number, paragraphIndex: number, text: string, bookId: string, editionId: string, chapterTitle?: string) => void;
   openAuth: () => void;
   notify: (message: string) => void;
@@ -29,7 +30,19 @@ const locationKey = (bookId: string, editionId: string) => `${bookId}:${editionI
 const passageId = (bookId: string, editionId: string, chapterIndex: number, paragraphIndex: number) => `${locationKey(bookId, editionId)}:${chapterIndex}:${paragraphIndex}`;
 function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function validProgress(value: unknown): value is ReadingProgress & Record<string, unknown> {
-  return record(value) && Number.isSafeInteger(value.chapterIndex) && Number(value.chapterIndex) >= 0 && Number.isSafeInteger(value.paragraphIndex) && Number(value.paragraphIndex) >= 0;
+  if (!record(value) || !Number.isSafeInteger(value.chapterIndex) || Number(value.chapterIndex) < 0 || !Number.isSafeInteger(value.paragraphIndex) || Number(value.paragraphIndex) < 0) return false;
+  const offset = value.charOffset === undefined ? 0 : value.charOffset;
+  if (!Number.isSafeInteger(offset) || Number(offset) < 0 || Number(offset) > 2_147_483_647) return false;
+  if (value.cfi !== undefined) {
+    if (typeof value.cfi !== "string") return false;
+    const parsed = parseEpubCfi(value.cfi);
+    if (!parsed || parsed.chapterIndex !== value.chapterIndex || parsed.paragraphIndex !== value.paragraphIndex || parsed.charOffset !== offset) return false;
+  }
+  return true;
+}
+function preciseProgress(value: ReadingProgress): ReadingProgress {
+  const charOffset = value.charOffset ?? 0;
+  return { chapterIndex: value.chapterIndex, paragraphIndex: value.paragraphIndex, charOffset, cfi: cfiForPosition(value.chapterIndex, value.paragraphIndex, charOffset) };
 }
 function validLocation(bookId: string, editionId: string, progress: ReadingProgress) {
   const book = knownBook(bookId);
@@ -46,7 +59,7 @@ function parseState(value: unknown): LibraryState {
     const editionId = book.editionId;
     if (!editionId) continue;
     const progress = value.progressByEdition[locationKey(book.id, editionId)];
-    if (validProgress(progress) && validLocation(book.id, editionId, progress)) progressByEdition[locationKey(book.id, editionId)] = { chapterIndex: progress.chapterIndex, paragraphIndex: progress.paragraphIndex };
+    if (validProgress(progress) && validLocation(book.id, editionId, progress)) progressByEdition[locationKey(book.id, editionId)] = preciseProgress(progress);
   }
   const bookmarks = value.bookmarks.flatMap((item) => { const passage = parsePassage(item); return passage ? [passage] : []; });
   const lastId = value.lastReadBookId;
@@ -58,7 +71,7 @@ function parseAction(value: unknown): LibraryAction | null {
   if (value.type === "save-book" && typeof value.saved === "boolean") return { type: value.type, bookId: value.bookId, saved: value.saved };
   if (typeof value.editionId !== "string" || !validProgress(value) || !validLocation(value.bookId, value.editionId, value)) return null;
   const position = { bookId: value.bookId, editionId: value.editionId, chapterIndex: value.chapterIndex, paragraphIndex: value.paragraphIndex };
-  if (value.type === "progress") return { ...position, type: value.type };
+  if (value.type === "progress") return { ...position, ...preciseProgress(value), type: value.type };
   if (value.type === "bookmark" && typeof value.saved === "boolean") return { ...position, type: value.type, saved: value.saved };
   return null;
 }
@@ -80,7 +93,7 @@ function parseCache(raw: string | null): CachedLibrary {
 }
 function applyAction(state: LibraryState, { action, bookmark }: QueuedAction): LibraryState {
   if (action.type === "save-book") return { ...state, savedIds: action.saved ? [...new Set([...state.savedIds, action.bookId])] : state.savedIds.filter((id) => id !== action.bookId) };
-  if (action.type === "progress") return { ...state, progressByEdition: { ...state.progressByEdition, [locationKey(action.bookId, action.editionId)]: { chapterIndex: action.chapterIndex, paragraphIndex: action.paragraphIndex } }, lastReadBookId: action.bookId };
+  if (action.type === "progress") return { ...state, progressByEdition: { ...state.progressByEdition, [locationKey(action.bookId, action.editionId)]: preciseProgress(action) }, lastReadBookId: action.bookId };
   const id = passageId(action.bookId, action.editionId, action.chapterIndex, action.paragraphIndex);
   const remaining = state.bookmarks.filter((passage) => passage.id !== id);
   return { ...state, bookmarks: action.saved && bookmark ? [...remaining, bookmark] : remaining };
@@ -258,11 +271,12 @@ function ReadlayStateProvider({ children, userId, sessionReady }: { children: Re
   function getProgress(bookId: string, editionId = editionFor(bookId)) {
     return editionId ? state.progressByEdition[locationKey(bookId, editionId)] || null : null;
   }
-  function saveProgress(chapterIndex: number, paragraphIndex: number, bookId: string, editionId: string) {
-    if (!ready || !validLocation(bookId, editionId, { chapterIndex, paragraphIndex })) return;
+  function saveProgress(chapterIndex: number, paragraphIndex: number, bookId: string, editionId: string, charOffset = 0) {
+    if (!ready || !validLocation(bookId, editionId, { chapterIndex, paragraphIndex, charOffset })) return;
+    const position = preciseProgress({ chapterIndex, paragraphIndex, charOffset });
     commands.current?.enqueue((current) => {
       const previous = current.progressByEdition[locationKey(bookId, editionId)];
-      return previous?.chapterIndex === chapterIndex && previous.paragraphIndex === paragraphIndex && current.lastReadBookId === bookId ? null : { id: crypto.randomUUID(), action: { type: "progress", bookId, editionId, chapterIndex, paragraphIndex } };
+      return previous?.chapterIndex === chapterIndex && previous.paragraphIndex === paragraphIndex && (previous.charOffset ?? 0) === charOffset && current.lastReadBookId === bookId ? null : { id: crypto.randomUUID(), action: { type: "progress", bookId, editionId, ...position } };
     });
   }
   function toggleBookmark(chapterIndex: number, paragraphIndex: number, text: string, bookId: string, editionId: string, chapterTitle = `Chapter ${chapterIndex + 1}`) {

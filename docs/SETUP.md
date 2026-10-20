@@ -1,6 +1,6 @@
 # Readlay setup
 
-Read ebooks, bookmark passages and switch to prepared narration at your current paragraph. Built with Next.js, TypeScript and plain CSS. GitHub identifies each reader; Neon PostgreSQL stores saved books, bookmarks and edition-specific progress. Kokoro runs on the preparation computer only. The website never generates speech.
+Read ebooks, bookmark passages and switch to prepared narration at your selected word. Built with Next.js, TypeScript and plain CSS. GitHub identifies each reader; Neon PostgreSQL stores saved books, bookmarks and edition-specific word progress. Kokoro and forced alignment run on the preparation computer only. The website never generates speech.
 
 Run commands from the repository root.
 
@@ -24,7 +24,7 @@ The catalogue works without credentials. Book text and audio streams require a G
 2. Set `AUTH_GITHUB_ID`, `AUTH_GITHUB_SECRET` and a random `AUTH_SECRET` of at least 32 characters. Use a different authentication secret for production.
 3. Set `AUTH_URL` and `NEXT_PUBLIC_SITE_URL` to the actual deployment origin. Never put credentials in a variable beginning `NEXT_PUBLIC_`.
 4. Set the pooled Neon connection as `DATABASE_URL`. Use `DATABASE_URL_UNPOOLED` for migrations.
-5. Run `npm run db:migrate`. It applies `db/migrations/001_library.sql` in one transaction, creating the three Readlay tables if absent. It does not drop data. Request handlers never change the schema.
+5. Run `npm run db:migrate`. It applies numbered files in `db/migrations` in order within one transaction. Migration 001 creates the library tables; migration 002 adds the saved character offset without dropping existing data. Request handlers never change the schema.
 
 For this linked workspace, `node --env-file-if-exists=.env.local scripts/configure-auth.mjs --check` checks the OAuth values without showing them. Omit `--check` to upload only those two values to `holsoma/readlay` through stdin. It does not download credentials or replace `AUTH_SECRET`. Redeploy after adding or changing the values.
 
@@ -49,16 +49,16 @@ The catalogue contains Atomic Habits, The 7 Habits of Highly Effective People, H
 See [audio preparation](AUDIO_PREPARATION.md) for installation, model download, generation, caches and upload commands, and [architecture](ARCHITECTURE.md) for the storage and synchronisation contract.
 
 - Python, Kokoro, model weights and FFmpeg stay on the preparation computer.
-- Generate paragraph audio, splitting long paragraphs internally while retaining one paragraph cue.
-- Combine PCM audio into chapter files and encode each chapter once as MP3. Sample counts determine paragraph offsets before encoding.
-- A versioned manifest maps paragraphs to time ranges and exact text hashes. No alignment model or paid speech API is used.
+- Generate sentence audio and align its waveform to the source words using a pinned local CTC acoustic model.
+- Combine PCM audio into chapter files and encode each chapter once as Opus. Sample counts preserve offsets across sentences and paragraphs.
+- A version 2 manifest maps source words to audio times and canonical EPUB CFIs. Unsupported or uncertain alignment stops publication. No paid speech or alignment API is used.
 - Narrators have independent manifests and timings. The initial English voice is `af_heart`, which is not Singaporean English. Future providers can emit the same format.
-- Upload completed MP3s and metadata to a **private** Supabase Storage bucket. Deploy the local manifests after upload. The server checks editions, paragraph hashes and paths before issuing expiring stream URLs.
+- Upload completed Opus files and metadata to the existing **private** Supabase Storage bucket, allowing the `audio/ogg` MIME type. Deploy matching manifests only after upload. The server checks editions, source words, hashes, CFIs and paths before issuing expiring stream URLs.
 - Playback speeds are 0.75, 1, 1.25, 1.5, 1.75 and 2 using the browser's `playbackRate`. Speed changes never regenerate audio.
 
-Only prepared chapters are offered. “Listen from here” seeks to a paragraph's start. Returning to reading selects the paragraph containing the current audio time. Cross-device resume uses this paragraph and starts it from the beginning. Paragraph alignment does not claim word-level precision.
+Only prepared chapters are offered. Tap a word or select text before choosing Listen. Playback begins at that word, and returning to Read marks and focuses the word currently being narrated. The shared character offset survives device and mode changes. CFIs address the cleaned canonical EPUB exported by the preparation script, rather than the unmodified source archive. Legacy version 1 MP3 recordings remain available with paragraph precision clearly labelled.
 
-Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `AUDIO_STORAGE_BUCKET` on the server and preparation computer. Keep the bucket private and the service key out of the browser. `AUDIO_STORAGE_MODE=local` enables authenticated local MP3 preview; this option is ignored on Vercel.
+Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `AUDIO_STORAGE_BUCKET` on the server and preparation computer. Keep the bucket private and the service key out of the browser. `AUDIO_STORAGE_MODE=local` enables authenticated local audio preview; this option is ignored on Vercel.
 
 Kokoro has no per-character API fee. Local generation uses the preparation computer's resources. Storage, bandwidth and hosting remain subject to service allowances and pricing. No Azure Speech package, key or variable is required.
 
@@ -70,7 +70,7 @@ Kokoro has no per-character API fee. Local generation uses the preparation compu
 4. Run `npx vercel --prod` from this prepared directory. The build runs the migration using credentials already held in Vercel, then builds Next.js. A production database credential download is unnecessary.
 5. Verify GitHub sign-in, a bookmark, progress from another browser and an uploaded audio chapter before describing the deployment as fully connected.
 
-Private book JSON and audio manifests are included in the CLI deployment as server files. MP3s, WAVs, model weights, caches and Python environments are excluded. MP3s stream from Supabase. Books and generated audio stay out of Git, so a Git-only deployment requires a separate private content delivery step. Never move them into `public`.
+Private book JSON and audio manifests are included in the CLI deployment as server files. Opus files, MP3s, WAVs, canonical EPUBs, model weights, caches and Python environments are excluded. Audio streams from Supabase. Books and generated audio stay out of Git, so a Git-only deployment requires a separate private content delivery step. Never move them into `public`.
 
 ## Checks
 

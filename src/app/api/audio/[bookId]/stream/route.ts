@@ -36,7 +36,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ book
       }
       const stream = Readable.toWeb(createReadStream(local, { start, end })) as ReadableStream<Uint8Array>;
       return new Response(stream, { status: range ? 206 : 200, headers: {
-        ...headers, "Content-Type": "audio/mpeg", "Accept-Ranges": "bytes", "Content-Length": String(end - start + 1),
+        ...headers, "Content-Type": manifest.format === "opus" ? "audio/ogg" : "audio/mpeg", "Accept-Ranges": "bytes", "Content-Length": String(end - start + 1),
         ...(range ? { "Content-Range": `bytes ${start}-${end}/${size}` } : {}),
       } });
     }
