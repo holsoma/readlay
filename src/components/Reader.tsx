@@ -50,7 +50,7 @@ const WordParagraph = memo(function WordParagraph({ text, index, offset, savedRa
 
 function BookIllustration({ image, bookId }: { image: ReaderImage; bookId: string }) {
   const src = `/api/book-assets/${bookId}/${image.id}`;
-  return <figure className="reader-illustration"><a href={src} target="_blank" rel="noopener" aria-label={`Open illustration at full size: ${image.alt}`}><Image unoptimized src={src} width={image.width} height={image.height} alt={image.alt} loading="lazy" decoding="async" /></a>{image.caption && <figcaption>{image.caption}</figcaption>}</figure>;
+  return <figure className="reader-illustration"><a href={src} target="_blank" rel="noopener" aria-label={`Open illustration at full size: ${image.alt}`}><Image unoptimized src={src} width={image.width} height={image.height} style={{ width: "100%", maxWidth: image.width, height: "auto", aspectRatio: `${image.width} / ${image.height}` }} alt={image.alt} loading="lazy" decoding="async" /></a>{image.caption && <figcaption>{image.caption}</figcaption>}</figure>;
 }
 
 export default function Reader({ book, chapters, editionId, presentation }: ReaderProps) {
@@ -205,7 +205,9 @@ function ReaderContent({ book, chapters, editionId, presentation }: ReaderProps)
         const offset = typeof location.charOffset === "number" && location.charOffset <= chapters[location.chapterIndex].paragraphs[location.paragraphIndex].length ? location.charOffset : undefined;
         setCharOffset(offset);
         positionRef.current = { chapterIndex: location.chapterIndex, paragraphIndex: location.paragraphIndex, ...(offset !== undefined ? { charOffset: offset, cfi: cfiForPosition(location.chapterIndex, location.paragraphIndex, offset) } : {}) };
-        lastSavedPosition.current = `${location.chapterIndex}:${location.paragraphIndex}:${offset ?? ""}`;
+        // A return link only previews a place. Deduplicate against the actual
+        // stored position so explicitly choosing this place still saves it.
+        lastSavedPosition.current = progress ? `${progress.chapterIndex}:${progress.paragraphIndex}:${progress.charOffset ?? ""}` : "";
         if (location.paragraphIndex > 0 || offset !== undefined) pendingScroll.current = positionRef.current;
       }
       setResumeReady(true);

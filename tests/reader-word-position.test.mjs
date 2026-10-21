@@ -208,6 +208,19 @@ test("the initial cloud snapshot does not override an explicitly opened bookmark
   assert.equal(app.player().location.charOffset, 6);
 });
 
+test("explicitly setting the URL override position saves it even when mounting and lookup leave different cloud progress unchanged", async (t) => {
+  const app = readerHarness({ chapterIndex: 0, paragraphIndex: 0, charOffset: 0 }, { search: "?chapter=0&paragraph=1&offset=5" }); t.after(() => app.cleanup()); await app.settle();
+  assert.equal(app.player().location.paragraphIndex, 1);
+  assert.equal(app.player().location.charOffset, 5);
+  assert.equal(app.saves.length, 0, "opening a Word Bank or bookmark URL does not change cloud progress");
+  app.tapWord(1, 5); await app.settle();
+  assert.equal(app.dictionary().selection.cfiStart, locations.cfiForPosition(0, 1, 5));
+  assert.equal(app.saves.length, 0, "looking up that word still leaves cloud progress unchanged");
+  app.dictionary().onUsePosition(); await app.settle();
+  assert.deepEqual(app.saves.at(-1), [0, 1, "book", "edition", 5], "the explicit action must persist the override instead of deduplicating against an unsaved URL position");
+  assert.equal(app.saves.length, 1);
+});
+
 test("clicking the cloud's existing position from a bookmark does not block later remote progress", async (t) => {
   const app = readerHarness({ chapterIndex: 0, paragraphIndex: 0, charOffset: 0 }, { search: "?chapter=0&paragraph=1&offset=5" }); t.after(() => app.cleanup()); await app.settle();
   app.placeWord(0, 0); await app.settle();

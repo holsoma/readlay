@@ -7,6 +7,7 @@
 .reader-prose .reader-paragraph-list-item.has-implicit-marker::before{content:"•";position:absolute;left:0;color:var(--reader-accent);font-size:.7em;top:.3em}
 .reader-list{margin-block:25px}
 .reader-prose .reader-paragraph-caption{font-family:var(--font-manrope),sans-serif;font-size:12px;letter-spacing:0;line-height:1.75;color:var(--reader-muted);margin-top:-8px}
+.reader-prose .reader-word.is-current-word{color:var(--reader-ink)}
 .reader-illustration{margin:42px 0 38px;break-inside:avoid;max-width:100%}
 .reader-illustration img{display:block;width:auto;max-width:100%;height:auto;margin-inline:auto;background:#fff;object-fit:contain;border:1px solid var(--reader-line)}
 .reader-illustration figcaption{margin:12px auto 0;max-width:58ch;font-family:var(--font-manrope),sans-serif;font-size:11px;line-height:1.7;text-align:center;color:var(--reader-muted)}
