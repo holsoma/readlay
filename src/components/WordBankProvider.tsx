@@ -101,7 +101,7 @@ function AccountWordBank({ children, userId, sessionReady }: { children: ReactNo
   }
   async function saveWord(input: SaveWordInput) {
     const next = await request({ action: "save", ...input });
-    const saved = next.find((word) => word.occurrences.some((occurrence) => occurrence.bookId === input.bookId && occurrence.editionId === input.editionId &&
+    const saved = next.find((word) => (!input.entry || word.word === input.entry.word) && word.occurrences.some((occurrence) => occurrence.bookId === input.bookId && occurrence.editionId === input.editionId &&
       occurrence.chapterIndex === input.chapterIndex && occurrence.paragraphIndex === input.paragraphIndex && occurrence.charStart === input.charStart && occurrence.charEnd === input.charEnd));
     if (!saved) throw new Error("The word was not found after saving. Try again.");
     return saved;

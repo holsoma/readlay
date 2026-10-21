@@ -6,6 +6,7 @@ import { ArrowRight, ArrowUpRight, BookA, Search, Trash2, X } from "lucide-react
 import { books } from "@/data/books";
 import type { DictionaryEntry, DictionaryMeaning } from "@/lib/dictionary-types";
 import type { SavedWord, WordStatus } from "@/lib/wordbank-types";
+import { inflectionCandidates } from "@/lib/dictionary-word";
 import { visibleWords, wordOccurrenceHref, wordStatusLabels, type WordBankFilter, type WordBankSort } from "@/lib/wordbank-view";
 import { AppShell } from "./AppShell";
 import { PronunciationButton } from "./PronunciationButton";
@@ -74,6 +75,7 @@ function WordEntry({ word }: { word: SavedWord }) {
         const book = bookById.get(occurrence.bookId);
         const href = wordOccurrenceHref(occurrence, book);
         return <div className="word-bank-occurrence" key={occurrence.id}>
+          {!inflectionCandidates(occurrence.selectedText).includes(word.word) && <p className="word-bank-source-spelling">Selected text: <strong>{occurrence.selectedText}</strong></p>}
           <blockquote>{occurrence.sentence}</blockquote>
           {href ? <Link href={href} className="word-bank-source" aria-label={`Return to ${occurrence.selectedText} in ${book!.title}`}>{book!.title}<span>Section {occurrence.chapterIndex + 1}, paragraph {occurrence.paragraphIndex + 1}</span><ArrowUpRight size={15} aria-hidden="true" /></Link> : <p className="word-bank-old-edition">{book?.title ?? "Source book"}: this saved edition is unavailable.</p>}
         </div>;

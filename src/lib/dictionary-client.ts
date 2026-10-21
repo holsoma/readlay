@@ -125,7 +125,9 @@ async function lookup(query: string): Promise<DictionaryLookup> {
           fallback = true;
         }
       }
-      if (fallback) {
+      // A genuine primary miss can still have an exact match in the second dictionary.
+      // Exhaust both providers for this word before trying a different inflection.
+      if (fallback || !entry) {
         if (controller.signal.aborted) throw unavailable();
         entry = await fromProvider(candidate, "fallback", controller.signal);
         if (entry) entry = await resolveInflection(entry, query, controller.signal);

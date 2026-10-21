@@ -6,6 +6,7 @@ import { BookOpen, Check, Plus, X } from "lucide-react";
 import type { DictionaryLookup } from "@/lib/dictionary-types";
 import { lookupDictionaryInBrowser } from "@/lib/dictionary-client";
 import { normaliseDictionaryWord } from "@/lib/dictionary-word";
+import { dictionarySpellingSuggestions } from "@/lib/dictionary-spelling";
 import type { AnchoredWordSelection, SelectionAnchor } from "@/lib/epub-selection";
 import { useWordBank } from "./WordBankProvider";
 import { useReadlay } from "./ReadlayProvider";
@@ -23,9 +24,15 @@ export default function DictionaryPopup({ selection, bookId, editionId, getAncho
   const [attempt, setAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [lookupWord, setLookupWord] = useState(() => normaliseDictionaryWord(selection.word));
+  const [spelling, setSpelling] = useState(selection.selectedText);
+  const [editingSpelling, setEditingSpelling] = useState(false);
+  const [spellingError, setSpellingError] = useState("");
   const [placement, setPlacement] = useState<CSSProperties>({ left: Math.max(12, selection.anchor.left), top: selection.anchor.bottom + 10, visibility: "hidden" });
   const popup = useRef<HTMLDivElement>(null);
   const closed = useRef(false);
+  const spellingInput = useRef<HTMLInputElement>(null);
+  const requestRevision = useRef(0);
   const entry = state.kind === "ready" ? state.lookup.entry : null;
   const primaryMeaning = entry?.meanings[0];
   const primaryDefinition = primaryMeaning?.definitions[0];
@@ -35,23 +42,26 @@ export default function DictionaryPopup({ selection, bookId, editionId, getAncho
     ...(primaryMeaning ? [{ ...primaryMeaning, definitions: primaryMeaning.definitions.slice(conciseDefinition !== fullDefinition || primaryDefinition?.example ? 0 : 1) }] : []),
     ...entry.meanings.slice(1),
   ].filter((meaning) => meaning.definitions.length) : [];
-  const lookupWord = normaliseDictionaryWord(selection.word);
-  const savedWord = words.find((item) => item.word === selection.word || item.word === entry?.word);
+  const originalLookupWord = normaliseDictionaryWord(selection.word);
+  const correctedSpelling = lookupWord !== originalLookupWord;
+  const suggestions = dictionarySpellingSuggestions(bookId, editionId, selection.word);
+  const savedWord = words.find((item) => item.word === (entry?.word ?? selection.word));
   const savedHere = savedWord?.occurrences.some((item) => item.bookId === bookId && item.editionId === editionId && item.chapterIndex === selection.chapterIndex && item.paragraphIndex === selection.paragraphIndex && item.charStart === selection.charStart && item.charEnd === selection.charEnd);
 
   useEffect(() => {
+    const revision = ++requestRevision.current;
     if (!lookupWord) {
-      const timer = setTimeout(() => setState({ kind: "missing", message: "No dictionary entry for this selection." }), 0);
+      const timer = setTimeout(() => { if (requestRevision.current === revision) setState({ kind: "missing", message: "No dictionary entry for this selection." }); }, 0);
       return () => clearTimeout(timer);
     }
     const abort = new AbortController();
     async function lookup() {
       try {
         const result = await lookupDictionaryInBrowser(lookupWord!, abort.signal);
-        if (abort.signal.aborted) return;
+        if (abort.signal.aborted || requestRevision.current !== revision) return;
         setState({ kind: "ready", lookup: result });
       } catch (failure) {
-        if (abort.signal.aborted) return;
+        if (abort.signal.aborted || requestRevision.current !== revision) return;
         const status = failure && typeof failure === "object" && "status" in failure ? failure.status : null;
         const message = failure instanceof Error ? failure.message : "The dictionary could not connect. Check your connection and try again.";
         setState({ kind: status === 404 ? "missing" : "error", message });
@@ -60,6 +70,22 @@ export default function DictionaryPopup({ selection, bookId, editionId, getAncho
     void lookup();
     return () => abort.abort();
   }, [lookupWord, attempt]);
+
+  useEffect(() => { if (editingSpelling) spellingInput.current?.focus({ preventScroll: true }); }, [editingSpelling]);
+
+  function submitSpelling(raw: string) {
+    const word = normaliseDictionaryWord(raw);
+    if (!word) { setSpellingError("Enter one English word."); return; }
+    // Invalidate the previous response immediately, before effect cleanup runs.
+    requestRevision.current += 1;
+    setSpellingError("");
+    setSaveError("");
+    setSpelling(word);
+    setState({ kind: "loading" });
+    setLookupWord(word);
+    setAttempt((value) => value + 1);
+    setEditingSpelling(false);
+  }
 
   const position = useCallback(() => {
     const box = popup.current;
@@ -127,7 +153,7 @@ export default function DictionaryPopup({ selection, bookId, editionId, getAncho
     setSaving(true);
     setSaveError("");
     try {
-      await saveWord({ word: selection.word, bookId, editionId, chapterIndex: selection.chapterIndex, paragraphIndex: selection.paragraphIndex, charStart: selection.charStart, charEnd: selection.charEnd, entry });
+      await saveWord({ word: selection.word, bookId, editionId, chapterIndex: selection.chapterIndex, paragraphIndex: selection.paragraphIndex, charStart: selection.charStart, charEnd: selection.charEnd, entry, ...(correctedSpelling && lookupWord ? { lookupWord } : {}) });
       if (!closed.current) notify(savedWord ? "This occurrence is saved in your Word Bank." : "Word saved to your Word Bank.");
     } catch (error) {
       if (!closed.current) setSaveError(error instanceof Error ? error.message : "This word could not be saved. Please try again.");
@@ -136,12 +162,16 @@ export default function DictionaryPopup({ selection, bookId, editionId, getAncho
 
   return <div ref={popup} className="reader-dictionary" role="dialog" aria-modal="false" aria-labelledby="dictionary-word-title" tabIndex={-1} style={placement} onPointerDown={(event) => event.stopPropagation()}>
     <div className="reader-dictionary-heading"><span>Dictionary</span><button className="reader-icon-button" aria-label="Close dictionary" onClick={onClose}><X size={17} /></button></div>
-    <div className="reader-dictionary-word"><h2 id="dictionary-word-title">{selection.selectedText}</h2>{entry && <PronunciationButton word={entry.word} audioUrl={entry.audioUrl} />}</div>
+    <div className="reader-dictionary-word"><h2 id="dictionary-word-title">{correctedSpelling ? entry?.word ?? lookupWord : selection.selectedText}</h2>{entry && <PronunciationButton word={entry.word} audioUrl={entry.audioUrl} />}</div>
+    {correctedSpelling && <p className="reader-dictionary-original">Selected text: <q>{selection.selectedText}</q></p>}
     {entry?.phonetic && <p className="reader-dictionary-phonetic">{entry.phonetic}</p>}
     {entry?.providerName && <p className="reader-dictionary-provider">Definitions: {entry.providerUrl ? <a href={entry.providerUrl} target="_blank" rel="noreferrer">{entry.providerName}</a> : entry.providerName}</p>}
-    {entry && entry.word.toLocaleLowerCase("en") !== selection.word && <p className="reader-dictionary-base">Definition of <strong>{entry.word}</strong></p>}
+    {entry && !correctedSpelling && entry.word.toLocaleLowerCase("en") !== selection.word && <p className="reader-dictionary-base">Definition of <strong>{entry.word}</strong></p>}
     {state.kind === "loading" && <p className="reader-dictionary-message" role="status">Looking up this word…</p>}
     {(state.kind === "missing" || state.kind === "error") && <div className="reader-dictionary-message" role="status"><p>{state.message}</p>{lookupWord && <button className="reader-dictionary-retry" onClick={() => { setState({ kind: "loading" }); setAttempt((value) => value + 1); }}>Try again</button>}</div>}
+    {(state.kind === "missing" || state.kind === "error") && suggestions.length > 0 && <div className="reader-dictionary-suggestions"><p>This edition appears to contain a text error. Try a word below, or enter its spelling.</p><div>{suggestions.map((word) => <button key={word} type="button" onClick={() => submitSpelling(word)}>Look up {word}</button>)}</div></div>}
+    {originalLookupWord !== null && (state.kind === "missing" || state.kind === "error" || editingSpelling) && <form className="reader-dictionary-spelling" onSubmit={(event) => { event.preventDefault(); submitSpelling(spelling); }}><label htmlFor="dictionary-corrected-spelling">Look up a corrected spelling</label><div><input ref={spellingInput} id="dictionary-corrected-spelling" value={spelling} maxLength={256} autoComplete="off" autoCapitalize="none" spellCheck={true} aria-invalid={!!spellingError} aria-describedby={spellingError ? "dictionary-spelling-error" : undefined} onChange={(event) => { setSpelling(event.target.value); setSpellingError(""); }} /><button type="submit">Look up</button></div>{spellingError && <p id="dictionary-spelling-error" role="alert">{spellingError}</p>}</form>}
+    {originalLookupWord !== null && !editingSpelling && (entry || state.kind === "loading") && <button className="reader-dictionary-change-spelling" type="button" onClick={() => setEditingSpelling(true)}>Change spelling</button>}
     {entry && <>
       {primaryMeaning && <div className="reader-dictionary-meanings reader-dictionary-primary"><section><h3>{primaryMeaning.partOfSpeech}</h3><p>{conciseDefinition}</p></section></div>}
       <div className="reader-dictionary-actions"><button className="reader-dictionary-save" disabled={saving || savedHere || (isSignedIn && !ready)} onClick={() => void save()}>{savedHere ? <Check size={15} /> : <Plus size={15} />}{savedHere ? "Already in Word Bank" : saving ? "Saving…" : savedWord ? "Save this occurrence" : isSignedIn ? "Save to Word Bank" : "Sign in to save"}</button><Link href="/word-bank" aria-label="Open Word Bank"><BookOpen size={16} /></Link></div>

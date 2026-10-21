@@ -50,10 +50,17 @@ export function parseWordBankAction(value: unknown): WordBankRequest {
     typeof value.word !== "string" || value.word.length > 200 || !normaliseDictionaryWord(value.word)) {
     throw new WordBankError(400, "Select one word in an available book.");
   }
+  let lookupWord: string | undefined;
+  if (value.lookupWord !== undefined) {
+    const normalised = normaliseDictionaryWord(value.lookupWord);
+    if (!normalised || value.entry === undefined) throw new WordBankError(400, "A corrected lookup needs one word and its displayed definition.");
+    lookupWord = normalised;
+  }
   return {
     ...shared, action: "save", word: value.word, bookId: value.bookId, editionId: value.editionId,
     chapterIndex: value.chapterIndex, paragraphIndex: value.paragraphIndex, charStart: value.charStart, charEnd: value.charEnd,
-    ...(value.entry === undefined ? {} : { entry: dictionarySnapshot(value.entry, value.word) }),
+    ...(lookupWord === undefined ? {} : { lookupWord }),
+    ...(value.entry === undefined ? {} : { entry: dictionarySnapshot(value.entry, lookupWord ?? value.word) }),
   };
 }
 
@@ -121,11 +128,15 @@ export async function getWordBank(userId: string): Promise<SavedWord[]> {
 export async function applyWordBankAction(userId: string, action: WordBankAction): Promise<void> {
   if (action.action === "save") {
     const source = await sourceForWord(action);
+    const lookupWord = action.lookupWord === undefined ? action.word : normaliseDictionaryWord(action.lookupWord);
+    if (!lookupWord || (action.lookupWord !== undefined && action.entry === undefined)) {
+      throw new WordBankError(400, "A corrected lookup needs one word and its displayed definition.");
+    }
     let entry: DictionaryEntry;
     if (action.entry !== undefined) {
       // This snapshot belongs only to the signed-in user's vocabulary. All source locations
       // still come from the server edition; no supplied definition is published to others.
-      entry = dictionarySnapshot(action.entry, action.word);
+      entry = dictionarySnapshot(action.entry, lookupWord);
     } else {
       try { entry = (await getDictionaryLookup(action.word)).entry; }
       catch (error) {

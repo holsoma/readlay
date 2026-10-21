@@ -13,7 +13,7 @@ function text(tree) {
   return typeof tree === "string" ? tree : "";
 }
 const entry = { word: "habit", phonetic: "/ˈhæbɪt/", audioUrl: null, meanings: [{ partOfSpeech: "noun", definitions: [{ definition: "An action repeated regularly." }] }], sourceUrl: null, licence: null };
-function harness({ signedIn = true, saved = [], save = async () => ({}), anchor = { left: 360, right: 380, top: 790, bottom: 815, width: 20, height: 25 }, popupHeight = 330, popupScrollHeight = popupHeight - 2, word = "habit" } = {}) {
+function harness({ signedIn = true, saved = [], save = async () => ({}), anchor = { left: 360, right: 380, top: 790, bottom: 815, width: 20, height: 25 }, popupHeight = 330, popupScrollHeight = popupHeight - 2, word = "habit", bookId = "book", editionId = "edition", sourcePosition = {} } = {}) {
   let cursor = 0, dirty = true, tree, mounted = true;
   const slots = [], effects = [], requests = [], notices = [], positions = [], listeners = new Map(), frames = [], observers = [];
   let closed = 0, auth = 0, positionsUsed = 0;
@@ -24,8 +24,8 @@ function harness({ signedIn = true, saved = [], save = async () => ({}), anchor 
     useCallback(fn, deps) { const i = cursor++; if (!unchanged(slots[i], deps)) slots[i] = { value: fn, deps }; return slots[i].value; },
     useEffect(fn, deps) { const i = cursor++; if (!unchanged(slots[i], deps)) { const cleanup = slots[i]?.cleanup; slots[i] = { deps }; effects.push(() => { cleanup?.(); slots[i].cleanup = fn(); }); } },
   };
-  const selection = { word, selectedText: word, chapterIndex: 0, paragraphIndex: 2, charStart: 12, charEnd: 17, anchor };
-  const props = { selection, bookId: "book", editionId: "edition", getAnchor: () => selection.anchor, onClose: () => closed++, onUsePosition: () => positionsUsed++ };
+  const selection = { word, selectedText: word, chapterIndex: 0, paragraphIndex: 2, charStart: 12, charEnd: 12 + word.length, ...sourcePosition, anchor };
+  const props = { selection, bookId, editionId, getAnchor: () => selection.anchor, onClose: () => closed++, onUsePosition: () => positionsUsed++ };
   const Popup = loadTypeScript("src/components/DictionaryPopup.tsx", {
     stubs: { react, "next/link": "link", "react/jsx-runtime": { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) }, "lucide-react": { BookOpen: "icon", Check: "icon", Plus: "icon", X: "icon" }, "./WordBankProvider": { useWordBank: () => ({ words: saved, ready: true, isSignedIn: signedIn, saveWord: save }) }, "./ReadlayProvider": { useReadlay: () => ({ openAuth: () => auth++, notify: (message) => notices.push(message) }) }, "./PronunciationButton": { PronunciationButton: "pronunciation" }, "@/lib/dictionary-client": { lookupDictionaryInBrowser: (word, signal) => new Promise((resolve, reject) => requests.push({ word, options: { signal }, resolve, reject })) } },
     globals: { Error, ResizeObserver: class { constructor(callback) { this.callback = callback; observers.push(this); } observe(target) { this.target = target; } disconnect() { this.disconnected = true; } }, fetch: (url, options) => new Promise((resolve, reject) => requests.push({ url, options, resolve, reject })), window: { innerWidth: 390, innerHeight: 844, requestAnimationFrame: (fn) => { frames.push(fn); return frames.length; }, cancelAnimationFrame() {}, addEventListener() {}, removeEventListener() {} }, document: { addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: (name) => listeners.delete(name) } },
@@ -105,6 +105,8 @@ test("non-dictionary source tokens never call the API and keep the explicit posi
     assert.equal(app.requests.length, 0);
     assert.ok(app.text().includes("No dictionary entry for this selection."));
     assert.ok(!app.button("Try again"));
+    assert.ok(!app.element((node) => node.type === "input"));
+    assert.ok(!app.button("Change spelling"));
     app.button("Set reading place").props.onClick();
     assert.equal(app.positionsUsed(), 1);
   }
@@ -165,4 +167,66 @@ test("content that grows beyond an earlier loading height cap moves above the wo
   assert.deepEqual({ ...app.style() }, above);
   app.resize(430, 428); await app.settle();
   assert.deepEqual({ ...app.style() }, above, "repeated measurements keep the same placement");
+});
+
+test("missing definitions offer explicit spelling recovery and save the corrected entry against the original source range", async (t) => {
+  const inputs = [];
+  const sourcePosition = { chapterIndex: 0, paragraphIndex: 0, charStart: 326, charEnd: 340, cfiRange: "epubcfi(/6/2[chapter-1]!/4/2,/1:326,/1:340)" };
+  const app = harness({ word: "subdecongenial", bookId: "laws-of-power", editionId: "e43027f07c709097", sourcePosition, save: async (input) => { inputs.push(input); return {}; } }); t.after(() => app.cleanup());
+  app.response(404, { error: "No definition was found." }); await app.settle();
+  assert.ok(app.text().includes("This edition appears to contain a text error."));
+  assert.equal(app.requests.length, 1, "suggestions do not trigger automatic lookups");
+  app.button("Look up subtle").props.onClick(); await app.settle();
+  assert.equal(app.requests[1].word, "subtle");
+  assert.ok(!app.button("Save to Word Bank"), "loading never exposes a stale save action");
+  const subtle = { ...entry, word: "subtle", meanings: [{ partOfSpeech: "adjective", definitions: [{ definition: "Not immediately obvious." }] }] };
+  app.response(200, { query: "subtle", entry: subtle }); await app.settle();
+  assert.equal(text(app.element((node) => node.type === "h2")), "subtle");
+  assert.ok(app.text().includes("Selected text: subdecongenial"));
+  app.button("Save to Word Bank").props.onClick(); await app.settle();
+  assert.deepEqual(JSON.parse(JSON.stringify(inputs[0])), { word: "subdecongenial", lookupWord: "subtle", bookId: "laws-of-power", editionId: "e43027f07c709097", chapterIndex: 0, paragraphIndex: 0, charStart: 326, charEnd: 340, entry: subtle });
+  app.button("Set reading place").props.onClick();
+  assert.equal(app.positionsUsed(), 1, "the original source-position callback is unchanged");
+});
+
+test("manual spelling lookup validates one word and sends no requests while typing", async (t) => {
+  const app = harness({ word: "notawordhere" }); t.after(() => app.cleanup());
+  app.response(404, { error: "No definition was found." }); await app.settle();
+  assert.ok(app.text().includes("Look up a corrected spelling"));
+  const input = () => app.element((node) => node.type === "input");
+  input().props.onChange({ target: { value: "two words" } }); await app.settle();
+  assert.equal(app.requests.length, 1);
+  app.element((node) => node.type === "form").props.onSubmit({ preventDefault() {} }); await app.settle();
+  assert.ok(app.text().includes("Enter one English word."));
+  assert.equal(app.requests.length, 1);
+  input().props.onChange({ target: { value: " CONGENIAL! " } }); await app.settle();
+  assert.equal(app.requests.length, 1);
+  app.element((node) => node.type === "form").props.onSubmit({ preventDefault() {} }); await app.settle();
+  assert.equal(app.requests[1].word, "congenial");
+});
+
+test("changing spelling cancels a pending lookup and a late response cannot replace the current definition", async (t) => {
+  const app = harness(); t.after(() => app.cleanup());
+  const original = app.requests[0];
+  app.button("Change spelling").props.onClick(); await app.settle();
+  app.element((node) => node.type === "input").props.onChange({ target: { value: "congenial" } }); await app.settle();
+  app.element((node) => node.type === "form").props.onSubmit({ preventDefault() {} }); await app.settle();
+  assert.equal(original.options.signal.aborted, true);
+  const corrected = { ...entry, word: "congenial", meanings: [{ partOfSpeech: "adjective", definitions: [{ definition: "Pleasant and agreeable." }] }] };
+  app.response(200, { query: "congenial", entry: corrected }); await app.settle();
+  original.resolve({ query: "habit", entry }); await app.settle();
+  assert.ok(app.text().includes("Pleasant and agreeable."));
+  assert.ok(!app.text().includes("An action repeated regularly."));
+  assert.equal(text(app.element((node) => node.type === "h2")), "congenial");
+});
+
+test("curated source-error suggestions are edition-scoped and generic missing words retain manual recovery", async (t) => {
+  for (const [bookId, editionId] of [["book", "e43027f07c709097"], ["laws-of-power", "different-edition"]]) {
+    const app = harness({ word: "subdecongenial", bookId, editionId }); t.after(() => app.cleanup());
+    app.response(404, { error: "No definition was found." }); await app.settle();
+    assert.ok(!app.button("Look up subtle"));
+    assert.ok(!app.button("Look up congenial"));
+    assert.ok(app.text().includes("Look up a corrected spelling"));
+    assert.equal(app.requests.length, 1);
+  }
 });

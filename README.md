@@ -9,6 +9,7 @@ Read ebooks and switch to prepared audiobooks at your selected word.
 - Read on desktop or mobile, with adjustable text size and themes.
 - Sign in with GitHub to synchronise reading progress, saved books and bookmarks.
 - Look up a word with a tap, double-click or text selection, then save its definition and original context to your Word Bank.
+- Check a second free dictionary when the first has no entry. For damaged EPUB spelling, look up a corrected word while retaining its original reading location.
 - Search saved vocabulary, track New, Learning and Learned words, and return to their exact book locations.
 - Choose Listen from here for a selected word, then return to the word being narrated. Looking up and saving words preserves your reading and audio positions.
 - Choose a narrator and a playback speed from 0.75× to 2×.

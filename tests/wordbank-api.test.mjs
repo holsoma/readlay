@@ -31,7 +31,7 @@ function harness() {
       "server-only": {}, "@neondatabase/serverless": { neon: () => sql },
       "@/data/books": { books: testBooks },
       "@/lib/book-content": { getBookContent: async () => ({ editionId: "edition-a", chapters: [
-        { paragraphs: ["A habit grows. Another habit stays.", "😀 We build habits."] },
+        { paragraphs: ["A habit grows. Another habit stays.", "😀 We build habits.", "A subdecongenial word appears."] },
       ] }) },
       "@/lib/dictionary": { DictionaryError, getDictionaryLookup: async () => {
         if (lookupError) throw lookupError;
@@ -119,6 +119,39 @@ test("snapshot input rejects unrelated headwords, malformed definitions and over
   const safe = store.parseWordBankAction({ ...action, entry: { ...entry, sourceUrl: "javascript:alert(1)", pronunciationSourceUrl: "data:text/html,bad" } });
   assert.equal(safe.entry.sourceUrl, null);
   assert.equal(safe.entry.pronunciationSourceUrl, null);
+});
+
+test("an explicit spelling correction saves its meaning against the unchanged original source word and CFI range", async () => {
+  const app = harness();
+  app.setLookupError(new app.DictionaryError(503, "No server lookup is available."));
+  const correctedEntry = { ...entry, word: "congenial", meanings: [{ partOfSpeech: "adjective", definitions: [{ definition: "Pleasant and agreeable." }] }] };
+  const original = { ...action, word: "subdecongenial", paragraphIndex: 2, charStart: 2, charEnd: 16 };
+  const parsed = app.store.parseWordBankAction({ ...original, lookupWord: "  Congenial  ", entry: correctedEntry });
+  assert.equal(parsed.word, "subdecongenial");
+  assert.equal(parsed.lookupWord, "congenial");
+  await app.store.applyWordBankAction("A", parsed);
+  const query = app.queries[0];
+  assert.ok(query.values.includes("congenial"), "the dictionary headword identifies the saved vocabulary");
+  assert.ok(query.values.includes("subdecongenial"), "the occurrence preserves the exact source spelling");
+  assert.ok(query.values.includes("A subdecongenial word appears."));
+  assert.ok(query.values.includes(locations.cfiForRange(0, 2, 2, 16)));
+  assert.ok(query.values.includes(16), "source length must not be replaced by the correction's length");
+  await assert.rejects(app.store.applyWordBankAction("A", { ...parsed, word: "congenial" }), errorIs(400));
+  await assert.rejects(app.store.applyWordBankAction("A", { ...parsed, charEnd: 11 }), errorIs(400));
+  assert.equal(app.queries.length, 1, "a spelling correction must not bypass source validation");
+});
+
+test("corrected lookups require one bounded word, a matching snapshot and the original source identity", async () => {
+  const { store } = harness();
+  for (const lookupWord of [null, {}, "", "two words", "<script>", "word\u0000", "a".repeat(257)]) {
+    assert.throws(() => store.parseWordBankAction({ ...action, lookupWord, entry }), errorIs(400));
+  }
+  assert.throws(() => store.parseWordBankAction({ ...action, lookupWord: "habit" }), errorIs(400));
+  assert.throws(() => store.parseWordBankAction({ ...action, lookupWord: "agreeable", entry }), errorIs(400));
+  assert.equal(store.parseWordBankAction(action).lookupWord, undefined, "older clients retain their existing server lookup behaviour");
+  const selected = store.parseWordBankAction({ ...action, lookupWord: "habits", entry });
+  assert.equal(selected.entry.word, "habit", "ordinary inflections are still accepted for an explicit lookup");
+  await assert.rejects(store.applyWordBankAction("A", { ...action, lookupWord: "habit" }), errorIs(400));
 });
 
 test("Word Bank reads all occurrences and scopes every read/write to the authenticated user", async () => {

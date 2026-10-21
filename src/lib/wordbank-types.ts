@@ -28,6 +28,8 @@ export type SavedWord = {
 };
 export type SaveWordInput = Pick<WordOccurrence, "bookId" | "editionId" | "chapterIndex" | "paragraphIndex" | "charStart" | "charEnd"> & {
   word: string;
+  // Explicit spelling correction for a lookup. The original source word and range stay unchanged.
+  lookupWord?: string;
   // A browser lookup can supply the displayed entry when the API blocks hosting providers.
   entry?: DictionaryEntry;
 };

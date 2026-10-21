@@ -55,7 +55,8 @@ function harness() {
     if (expected !== sessionUser) return Response.json({ error: "Your GitHub session changed." }, { status: 401 });
     let words = plain(remotes.get(sessionUser) ?? []);
     if (body?.action === "save") {
-      words = [savedWord()];
+      const headword = body.entry?.word ?? "habit";
+      if (!words.some(word => word.word === headword)) words = [savedWord(headword), ...words];
       remotes.set(sessionUser, words);
     } else if (body?.action === "remove") {
       words = words.filter((word) => word.id !== body.id); remotes.set(sessionUser, words);
@@ -190,4 +191,19 @@ test("an account change during a committed save discards the old mutation respon
   assert.equal(second.render().error, null);
   assert.equal(first.render().words.length, 0, "late mutation data must not be adopted");
   assert.equal(app.storage.size, 0, "late mutation data must not broadcast into another account");
+});
+
+test("saving an older corrected headword returns that word when another entry shares its source range", async (t) => {
+  const app = harness(); t.after(() => app.cleanup());
+  const newer = savedWord("congenial"), older = savedWord("subtle");
+  for (const word of [newer, older]) {
+    Object.assign(word.occurrences[0], { selectedText: "subdecongenial", charEnd: 16,
+      cfiEnd: "epubcfi(/6/2[chapter-1]!/4/2/1:16)", cfiRange: "epubcfi(/6/2[chapter-1]!/4/2,/1:2,/1:16)" });
+  }
+  app.remotes.set("A", [newer, older]);
+  const tab = app.mount(); await settle();
+  const saved = await tab.render().saveWord({ ...source, word: "subdecongenial", lookupWord: "subtle", charEnd: 16, entry: older.entry });
+  assert.equal(saved.id, older.id);
+  assert.equal(saved.word, "subtle");
+  assert.deepEqual(plain(tab.render().words.map(word => word.word)), ["congenial", "subtle"]);
 });

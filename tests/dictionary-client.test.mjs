@@ -55,23 +55,23 @@ test("browser cache is bounded, retains successful entries for a day and refresh
 });
 
 test("real JSON missing responses allow conservative inflections and have a shorter cache", async () => {
-  const dictionary = client(async (url) => url.endsWith("children") ? missing() : json(fixture("child")));
+  const dictionary = client(async (url) => url.startsWith("https://freedictionaryapi.com/") ? json(backupMissing("children")) : url.endsWith("children") ? missing() : json(fixture("child")));
   const result = await dictionary.lookup("children");
   assert.equal(result.query, "children");
   assert.equal(result.entry.word, "child");
-  assert.equal(dictionary.requests.length, 2);
+  assert.equal(dictionary.requests.length, 3);
   await dictionary.lookup("children");
-  assert.equal(dictionary.requests.length, 2);
+  assert.equal(dictionary.requests.length, 3);
   const exact = client(async () => json(fixture("children")));
   assert.equal((await exact.lookup("children")).entry.word, "children");
   assert.equal(exact.requests.length, 1);
-  const absent = client(async () => missing());
+  const absent = client(async (url) => url.startsWith("https://freedictionaryapi.com/") ? json(backupMissing("unknownword")) : missing());
   await assert.rejects(absent.lookup("unknownword"), (error) => error.status === 404);
-  await assert.rejects(absent.lookup("unknownword"), (error) => error.status === 404);
-  assert.equal(absent.requests.length, 1);
-  absent.advance(300_001);
   await assert.rejects(absent.lookup("unknownword"), (error) => error.status === 404);
   assert.equal(absent.requests.length, 2);
+  absent.advance(300_001);
+  await assert.rejects(absent.lookup("unknownword"), (error) => error.status === 404);
+  assert.equal(absent.requests.length, 4);
 });
 
 test("concurrent consumers share one request and cancelling one popup does not cancel another", async () => {
@@ -163,7 +163,7 @@ test("backup parsing preserves IPA, examples, nested meanings, licence and provi
   assert.equal(parseDictionaryEntry({ ...plain(entry), providerUrl: "https://evil.example/" }), null);
 });
 
-test("backup runs only after a primary service failure, and primary is retried after its two-minute recovery window", async () => {
+test("the primary service is retried after its two-minute recovery window", async () => {
   const dictionary = client(async (url) => {
     const word = decodeURIComponent(url.split("/").at(-1));
     if (url.startsWith("https://api.dictionaryapi.dev/")) return word === "hello" ? json({}, 503) : json(fixture(word));
@@ -175,6 +175,44 @@ test("backup runs only after a primary service failure, and primary is retried a
   dictionary.advance(120_001);
   assert.equal((await dictionary.lookup("book")).entry.providerName, "Dictionary API");
   assert.equal(dictionary.requests.filter((request) => request.url.startsWith("https://api.dictionaryapi.dev/")).length, 2);
+});
+
+test("an exact secondary definition is tried after a primary miss before any inflection", async () => {
+  const dictionary = client(async (url) => {
+    const word = decodeURIComponent(url.split("/").at(-1));
+    if (url.startsWith("https://api.dictionaryapi.dev/")) return word === "children" ? missing() : json(fixture(word));
+    return json(fallbackFixture("children", "People who have not yet reached adulthood."));
+  });
+  const result = await dictionary.lookup("children");
+  assert.equal(result.query, "children");
+  assert.equal(result.entry.word, "children");
+  assert.equal(result.entry.providerName, "FreeDictionaryAPI.com");
+  assert.deepEqual(dictionary.requests.map((request) => request.url), [
+    "https://api.dictionaryapi.dev/api/v2/entries/en/children",
+    "https://freedictionaryapi.com/api/v1/entries/en/children",
+  ]);
+  await dictionary.lookup("hello");
+  assert.equal(dictionary.requests.at(-1).url, "https://api.dictionaryapi.dev/api/v2/entries/en/hello", "a missing definition does not mark the primary service unavailable");
+});
+
+test("a secondary service failure after a primary miss is retried rather than cached as missing", async () => {
+  let secondaryRequests = 0;
+  const dictionary = client(async (url) => {
+    if (url.startsWith("https://api.dictionaryapi.dev/")) return missing();
+    return ++secondaryRequests === 1 ? json({}, 503) : json(fallbackFixture("congenial"));
+  });
+  await assert.rejects(dictionary.lookup("congenial"), (error) => error.status === 503);
+  assert.equal((await dictionary.lookup("congenial")).entry.word, "congenial");
+  assert.equal(dictionary.requests.length, 4);
+});
+
+test("unrecognised OCR text stays missing after both providers without guessing another word", async () => {
+  const dictionary = client(async (url) => url.startsWith("https://freedictionaryapi.com/") ? json(backupMissing("subdecongenial")) : missing());
+  await assert.rejects(dictionary.lookup("subdecongenial"), (error) => error.status === 404);
+  assert.equal(dictionary.requests.length, 2);
+  assert.ok(dictionary.requests.every((request) => request.url.endsWith("/subdecongenial")));
+  await assert.rejects(dictionary.lookup("subdecongenial"), (error) => error.status === 404);
+  assert.equal(dictionary.requests.length, 2, "missing results are cached only after both dictionaries were checked");
 });
 
 test("backup empty entries are real missing words and can try conservative inflection candidates", async () => {
