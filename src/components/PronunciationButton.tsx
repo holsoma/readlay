@@ -106,14 +106,16 @@ function PronunciationControl({ word, audioUrl }: { word: string; audioUrl: stri
   }
 
   const deviceAvailable = (!audioUrl || failed) && voice;
+  const recordedLabel = `${playing ? "Stop" : "Play"} pronunciation of ${word}`;
+  const deviceLabel = `${devicePlaying ? "Stop" : "Play"} device pronunciation of ${word}`;
   if (!audioUrl && !deviceAvailable) return <span className="pronunciation-unavailable">Pronunciation audio unavailable on this device.</span>;
   return <div className="pronunciation-control">
     {audioUrl && <><audio ref={audio} src={audioUrl} preload="none" onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} onError={() => { setFailed(true); setPlaying(false); }} />
-    <button type="button" className="pronunciation-button" onClick={toggle} aria-label={`${playing ? "Stop" : "Play"} pronunciation of ${word}`}>
-      {playing ? <Pause size={17} aria-hidden="true" /> : <Volume2 size={17} aria-hidden="true" />}<span>{playing ? "Stop" : "Listen"}</span>
+    <button type="button" className="pronunciation-button" onClick={toggle} aria-label={recordedLabel} title={recordedLabel}>
+      {playing ? <Pause size={17} aria-hidden="true" /> : <Volume2 size={17} aria-hidden="true" />}
     </button></>}
-    {deviceAvailable && <button type="button" className="pronunciation-button" onClick={toggleDevice} aria-label={`${devicePlaying ? "Stop" : "Play"} device pronunciation of ${word}`}>
-      {devicePlaying ? <Pause size={17} aria-hidden="true" /> : <Volume2 size={17} aria-hidden="true" />}<span>{devicePlaying ? "Stop device voice" : "Device voice"}</span>
+    {deviceAvailable && <button type="button" className="pronunciation-button" onClick={toggleDevice} aria-label={deviceLabel} title={deviceLabel}>
+      {devicePlaying ? <Pause size={17} aria-hidden="true" /> : <Volume2 size={17} aria-hidden="true" />}
     </button>}
     {failed && <span className="pronunciation-error" role="status">Pronunciation could not play. Try again.</span>}
     {deviceFailed && <span className="pronunciation-error" role="status">Device pronunciation could not play. Try again.</span>}

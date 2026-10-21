@@ -79,7 +79,10 @@ test("device pronunciation waits for local English voices, prefers British then 
   assert.ok(!word.button("Play device pronunciation of habit"));
   app.voicesChanged([voice("US", "en-US"), voice("Singapore", "en-SG"), voice("British", "en-GB")]); await app.settle();
   assert.equal(app.synthesis.spoken.length, 0);
-  assert.ok(word.text().includes("Device voice"));
+  const deviceButton = word.button("Play device pronunciation of habit");
+  assert.equal(text(deviceButton), "", "the available device control shows an icon without a visible label");
+  assert.equal(deviceButton.props.title, deviceButton.props["aria-label"]);
+  assert.equal(deviceButton.props.children.props["aria-hidden"], "true");
   word.button("Play device pronunciation of habit").props.onClick(); await app.settle();
   assert.equal(app.synthesis.spoken[0].voice.name, "British");
   assert.equal(app.synthesis.spoken[0].text, "habit");
@@ -93,7 +96,10 @@ test("device pronunciation waits for local English voices, prefers British then 
 test("recorded pronunciation remains preferred, playback failure offers an explicitly labelled local fallback", async t => {
   const app = harness({ voices: [voice("British", "en-GB")] }); t.after(() => app.cleanup());
   const word = app.mount({ audioUrl: "https://api.dictionaryapi.dev/media/pronunciations/en/habit-us.mp3", failMedia: true }); await app.settle();
-  assert.ok(word.button("Play pronunciation of habit"));
+  const recordedButton = word.button("Play pronunciation of habit");
+  assert.equal(text(recordedButton), "", "recorded pronunciation uses the same icon-only control");
+  assert.equal(recordedButton.props.title, recordedButton.props["aria-label"]);
+  assert.equal(recordedButton.props.children.props["aria-hidden"], "true");
   assert.ok(!word.button("Play device pronunciation of habit"));
   await word.button("Play pronunciation of habit").props.onClick(); await app.settle();
   assert.equal(word.media.plays, 1);
@@ -103,7 +109,9 @@ test("recorded pronunciation remains preferred, playback failure offers an expli
   word.button("Play device pronunciation of habit").props.onClick(); await app.settle();
   assert.equal(app.synthesis.spoken.length, 1);
   assert.equal(word.media.paused, true);
-  assert.ok(word.text().includes("Stop device voice"));
+  const stopButton = word.button("Stop device pronunciation of habit");
+  assert.equal(text(stopButton), "");
+  assert.equal(stopButton.props.title, "Stop device pronunciation of habit");
 });
 
 test("old row cleanup and late speech events cannot stop or clear a newer word", async t => {

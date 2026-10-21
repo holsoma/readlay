@@ -131,15 +131,29 @@ test("one concise primary definition keeps actions ahead of native More meanings
   assert.ok(app.text().indexOf("Set reading place") < app.text().indexOf("More meanings"));
 });
 
-test("fallback definitions visibly credit the provider and retain dictionary source and licence", async (t) => {
+test("definitions omit the provider line and keep source and licence under collapsed Credits", async (t) => {
   const app = harness(); t.after(() => app.cleanup());
   const attributed = { ...entry, providerName: "FreeDictionaryAPI.com", providerUrl: "https://freedictionaryapi.com/", sourceUrl: "https://en.wiktionary.org/wiki/habit", licence: { name: "CC BY-SA 4.0", url: "https://creativecommons.org/licenses/by-sa/4.0/" } };
   app.response(200, { query: "habit", entry: attributed }); await app.settle();
-  const credit = app.element((node) => node.props?.className === "reader-dictionary-provider");
-  assert.ok(text(credit).includes("Definitions: FreeDictionaryAPI.com"));
-  assert.equal(app.element((node) => node.type === "a" && text(node) === "FreeDictionaryAPI.com").props.href, attributed.providerUrl);
+  assert.ok(!app.element((node) => node.props?.className === "reader-dictionary-provider"));
+  assert.ok(!app.text().includes("FreeDictionaryAPI.com"));
+  assert.ok(!app.text().includes("Definitions:"));
+  const credits = app.element((node) => node.props?.className === "reader-dictionary-credits");
+  assert.equal(credits.type, "details");
+  assert.ok(!credits.props.open);
+  assert.ok(text(credits).startsWith("Credits"));
   assert.equal(app.element((node) => node.type === "a" && text(node) === "Dictionary source").props.href, attributed.sourceUrl);
   assert.equal(app.element((node) => node.type === "a" && text(node) === "CC BY-SA 4.0").props.href, attributed.licence.url);
+});
+
+test("pronunciation displays readable stress-marked spelling without exposing IPA or changing the saved entry", async (t) => {
+  const app = harness(); t.after(() => app.cleanup());
+  app.response(200, { query: "habit", entry }); await app.settle();
+  const pronunciation = app.element((node) => node.props?.className === "reader-dictionary-phonetic");
+  assert.equal(text(pronunciation), "HAB-it");
+  assert.equal(pronunciation.props["aria-label"], "Approximate pronunciation: HAB-it");
+  assert.ok(!app.text().includes(entry.phonetic));
+  assert.equal(entry.phonetic, "/ˈhæbɪt/");
 });
 
 test("child pronunciation height changes reposition the popup and observers disconnect on unmount", async () => {

@@ -7,6 +7,7 @@ import { books } from "@/data/books";
 import type { DictionaryEntry, DictionaryMeaning } from "@/lib/dictionary-types";
 import type { SavedWord, WordStatus } from "@/lib/wordbank-types";
 import { inflectionCandidates } from "@/lib/dictionary-word";
+import { pronunciationRespelling } from "@/lib/pronunciation-respelling";
 import { visibleWords, wordOccurrenceHref, wordStatusLabels, type WordBankFilter, type WordBankSort } from "@/lib/wordbank-view";
 import { AppShell } from "./AppShell";
 import { PronunciationButton } from "./PronunciationButton";
@@ -27,13 +28,13 @@ function Meanings({ meaning, from = 0, count }: { meaning: DictionaryMeaning; fr
 }
 
 function Attribution({ entry }: { entry: DictionaryEntry }) {
-  return <div className="word-bank-attribution">
-    {entry.providerName && entry.providerUrl && <a href={entry.providerUrl} target="_blank" rel="noreferrer">{entry.providerName}</a>}
+  if (!entry.sourceUrl && !entry.licence && !entry.pronunciationSourceUrl && !entry.pronunciationLicence) return null;
+  return <details className="word-bank-credits"><summary>Credits</summary><div className="word-bank-attribution">
     {entry.sourceUrl && <a href={entry.sourceUrl} target="_blank" rel="noreferrer">Definition source<ArrowUpRight size={12} aria-hidden="true" /></a>}
     {entry.licence && <a href={entry.licence.url} target="_blank" rel="noreferrer">{entry.licence.name}</a>}
     {entry.pronunciationSourceUrl && <a href={entry.pronunciationSourceUrl} target="_blank" rel="noreferrer">Audio source</a>}
     {entry.pronunciationLicence && <a href={entry.pronunciationLicence.url} target="_blank" rel="noreferrer">Audio: {entry.pronunciationLicence.name}</a>}
-  </div>;
+  </div></details>;
 }
 
 function WordEntry({ word }: { word: SavedWord }) {
@@ -55,10 +56,11 @@ function WordEntry({ word }: { word: SavedWord }) {
     catch (failure) { setError(failure instanceof Error ? failure.message : "The word could not be removed. Try again."); setPending(null); }
   }
   const firstMeaning = word.entry.meanings[0];
+  const respelling = pronunciationRespelling(word.entry.phonetic);
   const moreMeanings = word.entry.meanings.length > 1 || firstMeaning.definitions.length > 2;
   return <article className="word-bank-entry" aria-labelledby={`word-${word.id}`}>
     <header className="word-bank-entry-heading">
-      <div><div className="word-bank-word-line"><h2 id={`word-${word.id}`}>{word.word}</h2>{word.entry.phonetic && <span className="word-bank-phonetic">{word.entry.phonetic}</span>}</div>
+      <div><div className="word-bank-word-line"><h2 id={`word-${word.id}`}>{word.word}</h2>{respelling && <span className="word-bank-phonetic" aria-label={`Approximate pronunciation: ${respelling}`} title="Approximate pronunciation. Capitals show the stressed syllable.">{respelling}</span>}</div>
         <div className="word-bank-word-meta"><PronunciationButton key={word.entry.audioUrl} word={word.word} audioUrl={word.entry.audioUrl} /><span>Saved <time dateTime={word.savedAt}>{dateFormat.format(new Date(word.savedAt))}</time></span></div>
       </div>
       <div className="word-bank-entry-actions"><label className={`word-bank-status is-${word.status}`}><span className="sr-only">Learning status for {word.word}</span>

@@ -7,6 +7,7 @@ import type { DictionaryLookup } from "@/lib/dictionary-types";
 import { lookupDictionaryInBrowser } from "@/lib/dictionary-client";
 import { normaliseDictionaryWord } from "@/lib/dictionary-word";
 import { dictionarySpellingSuggestions } from "@/lib/dictionary-spelling";
+import { pronunciationRespelling } from "@/lib/pronunciation-respelling";
 import type { AnchoredWordSelection, SelectionAnchor } from "@/lib/epub-selection";
 import { useWordBank } from "./WordBankProvider";
 import { useReadlay } from "./ReadlayProvider";
@@ -35,6 +36,7 @@ export default function DictionaryPopup({ selection, bookId, editionId, getAncho
   const spellingInput = useRef<HTMLInputElement>(null);
   const requestRevision = useRef(0);
   const entry = state.kind === "ready" ? state.lookup.entry : null;
+  const respelling = pronunciationRespelling(entry?.phonetic);
   const primaryMeaning = entry?.meanings[0];
   const primaryDefinition = primaryMeaning?.definitions[0];
   const fullDefinition = primaryDefinition?.definition ?? "";
@@ -171,8 +173,7 @@ export default function DictionaryPopup({ selection, bookId, editionId, getAncho
     <div className="reader-dictionary-heading"><span>Dictionary</span><button className="reader-icon-button" aria-label="Close dictionary" onClick={onClose}><X size={17} /></button></div>
     <div className="reader-dictionary-word"><h2 id="dictionary-word-title">{correctedSpelling ? entry?.word ?? lookupWord : selection.selectedText}</h2>{entry && <PronunciationButton word={entry.word} audioUrl={entry.audioUrl} />}</div>
     {correctedSpelling && <p className="reader-dictionary-original">Selected text: <q>{selection.selectedText}</q></p>}
-    {entry?.phonetic && <p className="reader-dictionary-phonetic">{entry.phonetic}</p>}
-    {entry?.providerName && <p className="reader-dictionary-provider">Definitions: {entry.providerUrl ? <a href={entry.providerUrl} target="_blank" rel="noreferrer">{entry.providerName}</a> : entry.providerName}</p>}
+    {respelling && <p className="reader-dictionary-phonetic" aria-label={`Approximate pronunciation: ${respelling}`} title="Approximate pronunciation. Capitals show the stressed syllable.">{respelling}</p>}
     {entry && !correctedSpelling && entry.word.toLocaleLowerCase("en") !== selection.word && <p className="reader-dictionary-base">Definition of <strong>{entry.word}</strong></p>}
     {state.kind === "loading" && <p className="reader-dictionary-message" role="status">Looking up this word…</p>}
     {(state.kind === "missing" || state.kind === "error") && <div className="reader-dictionary-message" role="status"><p>{state.message}</p>{lookupWord && <button className="reader-dictionary-retry" onClick={() => { setState({ kind: "loading" }); setAttempt((value) => value + 1); }}>Try again</button>}</div>}
@@ -188,7 +189,7 @@ export default function DictionaryPopup({ selection, bookId, editionId, getAncho
     <button className="reader-dictionary-position" onClick={onUsePosition}>Set reading place</button>
     {entry && <>
       {!!moreMeanings.length && <details className="reader-dictionary-more" onToggle={position}><summary>More meanings</summary><div className="reader-dictionary-meanings">{moreMeanings.map((meaning, index) => <section key={`${meaning.partOfSpeech}-${index}`}><h3>{meaning.partOfSpeech}</h3><ol>{meaning.definitions.map((definition, meaningIndex) => <li key={meaningIndex}><p>{definition.definition}</p>{definition.example && <p className="reader-dictionary-example">“{definition.example}”</p>}</li>)}</ol></section>)}</div></details>}
-      <div className="reader-dictionary-source">{entry.sourceUrl && <a href={entry.sourceUrl} target="_blank" rel="noreferrer">Dictionary source</a>}{entry.licence && <a href={entry.licence.url} target="_blank" rel="noreferrer">{entry.licence.name}</a>}{entry.pronunciationLicence && <a href={entry.pronunciationLicence.url} target="_blank" rel="noreferrer">Audio: {entry.pronunciationLicence.name}</a>}</div>
+      {(entry.sourceUrl || entry.licence || entry.pronunciationSourceUrl || entry.pronunciationLicence) && <details className="reader-dictionary-credits" onToggle={position}><summary>Credits</summary><div className="reader-dictionary-source">{entry.sourceUrl && <a href={entry.sourceUrl} target="_blank" rel="noreferrer">Dictionary source</a>}{entry.licence && <a href={entry.licence.url} target="_blank" rel="noreferrer">{entry.licence.name}</a>}{entry.pronunciationSourceUrl && <a href={entry.pronunciationSourceUrl} target="_blank" rel="noreferrer">Audio source</a>}{entry.pronunciationLicence && <a href={entry.pronunciationLicence.url} target="_blank" rel="noreferrer">Audio: {entry.pronunciationLicence.name}</a>}</div></details>}
     </>}
   </div>;
 }
