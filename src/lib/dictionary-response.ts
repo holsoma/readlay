@@ -104,7 +104,10 @@ export function parseFallbackDictionaryEntry(value: unknown, requestedWord: stri
         const sense = record(senseValue);
         if (!sense) continue;
         const definition = text(sense.definition, 2000);
-        if (definition && !definitions.some((item) => item.definition === definition)) {
+        // Wiktionary sometimes groups real definitions under a category gloss.
+        // The heading itself is not a meaning; an empty group remains invalid.
+        const categoryHeading = definition && /^Senses relating to [^\r\n.?!]+\.?$/i.test(definition);
+        if (definition && !categoryHeading && !definitions.some((item) => item.definition === definition)) {
           const example = Array.isArray(sense.examples) ? sense.examples.slice(0, 4).map((item) => text(item, 1500)).find(Boolean) : null;
           definitions.push(example ? { definition, example } : { definition });
         }
