@@ -53,6 +53,7 @@ test("reader headings distinguish front matter and numbered chapters without cha
   assert.deepEqual(plain(presentation.readerSectionHeading("PREFACE", 0)), { label: "Front matter", title: "Preface" });
   assert.deepEqual(plain(presentation.readerSectionHeading("Law 1: Never outshine the master", 1)), { label: "Law 1", title: "Never outshine the master" });
   assert.deepEqual(plain(presentation.readerSectionHeading("4. A chapter title", 5)), { label: "Chapter 4", title: "A chapter title" });
+  assert.deepEqual(plain(presentation.readerSectionHeading("PART ONE: Essential principles / 4: A useful chapter", 5)), { label: "PART ONE: Essential principles / Chapter 4", title: "A useful chapter" });
 });
 
 test("book illustrations require GitHub authentication and a manifest-listed asset before any file read", async () => {

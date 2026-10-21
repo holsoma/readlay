@@ -25,6 +25,8 @@ const kinds = new Set(["body", "heading", "subheading", "quote", "list-item", "c
 const formats = { "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp" } as const;
 
 export function readerSectionHeading(title: string, index: number): { label: string; title: string } {
+  const grouped = /^(.+?)\s*\/\s*(\d+)\s*:\s*(.+)$/u.exec(title);
+  if (grouped) return { label: `${grouped[1]} / Chapter ${grouped[2]}`, title: grouped[3] };
   const named = /^(Chapter|Law|Habit|Part)\s+([\w]+)\s*[:/.]\s*(.+)$/iu.exec(title);
   if (named) return { label: `${named[1]} ${named[2]}`, title: named[3] };
   const numbered = /^(\d+)\.\s+(.+)$/u.exec(title);
