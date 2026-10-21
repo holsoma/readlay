@@ -127,3 +127,6 @@ The browser accessibility check uses `?__qa=1` and exposes JSON in `#readlay-qa`
 Original application code and eight original typographic cover studies use the MIT licence. Font licences are in `src/fonts`. Imported book text, publisher artwork, generated narration and third-party model assets are excluded from the application's MIT licence. Kokoro's own licence does not grant rights to the books.
 
 Prepare and distribute narration only for editions with the necessary permissions. Keep the preparation rights record. Signed-in access does not itself grant distribution rights.
+## R2 safety controls
+
+Before using R2 uploads or playback, apply the separate service-only Supabase migrations in `supabase/migrations/`, configure the Cloudflare read-only Analytics token, admin GitHub IDs and cron secret, then obtain a real usage observation and complete inventory. `/admin/r2` provides usage statistics, warnings and server-enforced safety settings. See [R2 usage protection](R2_USAGE_PROTECTION.md) for setup and limitations. These controls do not guarantee zero charges and never delete files automatically.

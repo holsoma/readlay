@@ -39,6 +39,9 @@ scripts/__pycache__
 .agents
 .codex
 .aws
+supabase/.temp
+supabase/.branches
+.local/r2-quota-qa
 .local/audiobooks/**/*.wav
 .local/audiobooks/**/*.mp3
 .local/audiobooks/**/preparation.json

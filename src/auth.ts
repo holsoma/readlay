@@ -1,6 +1,7 @@
 import NextAuth from "next-auth";
 import GitHub from "next-auth/providers/github";
 import type { TokenSet } from "@auth/core/types";
+import { isReadlayAdminId } from "@/lib/admin-identity";
 
 const requiredVariables = ["AUTH_SECRET", "AUTH_GITHUB_ID", "AUTH_GITHUB_SECRET"] as const;
 export const missingAuthVariables = requiredVariables.filter((name) => !process.env[name]?.trim());
@@ -60,6 +61,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     session({ session, token }) {
       session.user.id = token.sub || "";
       session.user.login = typeof token.login === "string" ? token.login : undefined;
+      session.user.isAdmin = isReadlayAdminId(session.user.id);
       return session;
     },
     redirect({ url, baseUrl }) {

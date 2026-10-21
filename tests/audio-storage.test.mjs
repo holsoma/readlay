@@ -27,18 +27,13 @@ function storageHarness({ env = {}, signedUrl, signingError } = {}) {
   return { storage, calls };
 }
 
-test("R2 signing uses the private account endpoint and one exact read-only object", async () => {
+test("R2 refuses reusable signed URLs that could bypass the quota controller", async () => {
   const { storage, calls } = storageHarness();
   const destination = storage.audioStorageDestination("r2");
-  const signed = new URL(await storage.createSignedAudioUrl(destination, audioPath, 10800));
-  assert.equal(signed.origin, origin);
-  assert.deepEqual(plain(calls.commands), [{ Bucket: "readlay-audio", Key: audioPath }]);
-  assert.equal(calls.clients[0].region, "auto");
-  assert.equal(calls.clients[0].endpoint, origin);
-  assert.equal(calls.clients[0].forcePathStyle, true);
-  assert.deepEqual(plain(calls.signatures), [{ expiresIn: 15300 }], "slow playback remains valid without a permanent public URL");
-  assert.equal(calls.destroyed, 1);
-  assert.equal(signed.href.includes(environment.R2_SECRET_ACCESS_KEY), false);
+  await assert.rejects(storage.createSignedAudioUrl(destination, audioPath, 10800), /quota-checked stream/);
+  assert.deepEqual(plain(calls.commands), []);
+  assert.equal(calls.clients.length, 0);
+  assert.deepEqual(plain(calls.signatures), []);
 });
 
 test("storage receipts select their own provider and reject changed accounts, buckets and unknown providers", () => {
@@ -67,7 +62,7 @@ test("R2 never signs malformed paths or accepts redirects to another origin or o
   ]) {
     const { storage, calls } = storageHarness({ signedUrl });
     await assert.rejects(storage.createSignedAudioUrl(storage.audioStorageDestination("r2"), audioPath, 60));
-    assert.equal(calls.destroyed, 1);
+    assert.equal(calls.destroyed, 0);
   }
 });
 
@@ -83,17 +78,10 @@ test("R2 rejects invalid configuration before signing and releases a failed sign
   }
   const { storage, calls } = storageHarness({ signingError: new Error("Private SDK detail") });
   await assert.rejects(storage.createSignedAudioUrl(storage.audioStorageDestination("r2"), audioPath, 60));
-  assert.equal(calls.destroyed, 1);
+  assert.equal(calls.destroyed, 0);
 });
 
-test("the official AWS SDK produces a path-scoped R2 GET signature without contacting storage", async () => {
+test("a real SDK installation cannot reactivate bypass URLs", async () => {
   const storage = loadTypeScript("src/lib/audio-storage.ts", { stubs: { "server-only": {} }, globals: { process: { env: environment } } });
-  const signed = new URL(await storage.createSignedAudioUrl(storage.audioStorageDestination("r2"), audioPath, 60));
-  assert.equal(signed.origin, origin);
-  assert.equal(decodeURIComponent(signed.pathname), `/readlay-audio/${audioPath}`);
-  assert.equal(signed.searchParams.get("X-Amz-Algorithm"), "AWS4-HMAC-SHA256");
-  assert.equal(signed.searchParams.get("X-Amz-Expires"), "3600");
-  assert.match(signed.searchParams.get("X-Amz-Credential"), /\/auto\/s3\/aws4_request$/);
-  assert.equal(signed.searchParams.get("X-Amz-SignedHeaders"), "host");
-  assert.equal(signed.href.includes(environment.R2_SECRET_ACCESS_KEY), false);
+  await assert.rejects(storage.createSignedAudioUrl(storage.audioStorageDestination("r2"), audioPath, 60), /quota-checked stream/);
 });

@@ -2,13 +2,15 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { auth, authConfigured } from "@/auth";
-import { AudioError, getAudioManifest, localAudioFile, signedAudioUrl } from "@/lib/audio-store";
+import { AudioError, audioStorageForManifest, getAudioManifest, localAudioFile, signedAudioUrl } from "@/lib/audio-store";
+import { streamR2Audio } from "@/lib/r2-audio";
+import { R2QuotaError } from "@/lib/r2-quota";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "private, no-store, max-age=0", Vary: "Cookie", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer" };
 
-export async function GET(request: Request, { params }: { params: Promise<{ bookId: string }> }) {
+async function streamAudio(request: Request, { params }: { params: Promise<{ bookId: string }> }) {
   try {
     const session = authConfigured ? await auth() : null;
     if (!session?.user?.id) throw new AudioError(401, "Sign in to listen.");
@@ -34,16 +36,21 @@ export async function GET(request: Request, { params }: { params: Promise<{ book
         else { start = Number(match[1]); if (match[2]) end = Math.min(end, Number(match[2])); }
         if (start > end || start >= size) return new Response(null, { status: 416, headers: { ...headers, "Content-Range": `bytes */${size}` } });
       }
-      const stream = Readable.toWeb(createReadStream(local, { start, end })) as ReadableStream<Uint8Array>;
+      const stream = request.method === "HEAD" ? null : Readable.toWeb(createReadStream(local, { start, end })) as ReadableStream<Uint8Array>;
       return new Response(stream, { status: range ? 206 : 200, headers: {
         ...headers, "Content-Type": manifest.format === "opus" ? "audio/ogg" : "audio/mpeg", "Accept-Ranges": "bytes", "Content-Length": String(end - start + 1),
         ...(range ? { "Content-Range": `bytes ${start}-${end}/${size}` } : {}),
       } });
     }
+    const destination = audioStorageForManifest(manifest);
+    if (destination?.provider === "r2") return await streamR2Audio(request, session.user.id, destination, chapter.audioPath, chapter.byteLength);
     const url = await signedAudioUrl(chapter.audioPath, chapter.durationSeconds, manifest);
     return new Response(null, { status: 307, headers: { ...headers, Location: url } });
   } catch (error) {
-    return Response.json({ error: error instanceof AudioError ? error.message : "Audio is temporarily unavailable." },
-      { status: error instanceof AudioError ? error.status : 503, headers });
+    return Response.json({ error: error instanceof AudioError || error instanceof R2QuotaError ? error.message : "Audio is temporarily unavailable." },
+      { status: error instanceof AudioError || error instanceof R2QuotaError ? error.status : 503, headers });
   }
 }
+
+export const GET = streamAudio;
+export const HEAD = streamAudio;

@@ -148,6 +148,10 @@ export function localAudioFile(audioPath: string): string | null {
   return resolved;
 }
 
+export function audioStorageForManifest(manifest: AudioManifest): AudioStorageDestination | null {
+  return publicationDestinations.get(manifest) ?? null;
+}
+
 export async function signedAudioUrl(audioPath: string, durationSeconds: number, manifest?: AudioManifest): Promise<string> {
   try {
     const destination = manifest ? publicationDestinations.get(manifest) : audioStorageDestination("supabase");

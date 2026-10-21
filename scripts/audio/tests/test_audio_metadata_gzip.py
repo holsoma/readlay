@@ -18,7 +18,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 from audio.r2_storage import R2Storage
 from pack_audio_metadata import pack
-from test_r2_storage import ACCOUNT, ACCESS, SECRET, FakeS3
+from test_r2_storage import ACCOUNT, ACCESS, SECRET, FakeQuota, FakeS3
 import upload_audiobook
 
 
@@ -74,7 +74,7 @@ class AudioMetadataGzipTests(unittest.TestCase):
             client = FakeS3()
             client.corrupt = "application/gzip" if corrupt_gzip else False
             def create(*settings):
-                return R2Storage(*settings, client=client)
+                return R2Storage(*settings, client=client, quota=FakeQuota())
             environment = {"R2_ACCOUNT_ID": ACCOUNT, "R2_ACCESS_KEY_ID": ACCESS, "R2_SECRET_ACCESS_KEY": SECRET, "R2_AUDIO_BUCKET": "readlay-audio"}
             with patch("audio.r2_storage.R2Storage", side_effect=create), patch.dict(os.environ, environment):
                 yield client, client.puts

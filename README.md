@@ -59,3 +59,6 @@ python -m unittest scripts.test_import_pdf_book scripts.test_map_book_editions
 ## Licence
 
 Readlay's application code and original cover studies use the [MIT licence](LICENSE). Font licences are included in `src/fonts`. Books, generated narration and third-party model assets have separate rights and are not covered by Readlay's licence.
+## R2 usage protection
+
+Readlay includes an administrator-only R2 usage page at `/admin/r2`, backed by the existing Supabase project. It checks storage and request budgets before uploads and audio requests, with default limits of 9 GB, 800,000 Class A and 8 million Class B operations. Configure the read-only Cloudflare Analytics token and admin GitHub IDs before enabling the release. Existing files are never deleted automatically. These checks cannot guarantee zero Cloudflare charges. See [setup and limitations](docs/R2_USAGE_PROTECTION.md).

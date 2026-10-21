@@ -20,7 +20,7 @@ class R2Storage:
     provider = "r2"
 
     def __init__(self, account_id: str, access_key: str, secret_key: str,
-                 bucket: str, private_bucket_confirmed: bool = False, client=None):
+                 bucket: str, private_bucket_confirmed: bool = False, client=None, quota=None):
         if not isinstance(account_id, str) or not re.fullmatch(r"[a-fA-F0-9]{32}", account_id):
             raise PreparationError("R2_ACCOUNT_ID must be the 32-character account identifier.")
         if not isinstance(access_key, str) or not isinstance(secret_key, str) or not re.fullmatch(r"[a-fA-F0-9]{32}", access_key) or not re.fullmatch(r"[a-fA-F0-9]{64}", secret_key):
@@ -31,6 +31,10 @@ class R2Storage:
             raise PreparationError("R2_AUDIO_BUCKET must contain 3 to 63 lowercase letters, numbers or hyphens, with a letter or number at each end.")
         self.bucket = bucket
         self.url = f"https://{account_id.lower()}.r2.cloudflarestorage.com"
+        if quota is None:
+            from .r2_quota import SupabaseR2Quota
+            quota = SupabaseR2Quota(account_id.lower(), bucket)
+        self.quota = quota
         if client is None:
             try:
                 import boto3
@@ -41,13 +45,18 @@ class R2Storage:
                 client = boto3.client("s3", endpoint_url=self.url, region_name="auto",
                                       aws_access_key_id=access_key, aws_secret_access_key=secret_key,
                                       config=Config(signature_version="s3v4", connect_timeout=15,
-                                                    read_timeout=120, retries={"max_attempts": 3},
+                                                    read_timeout=120, retries={"total_max_attempts": 1},
                                                     s3={"addressing_style": "path"}))
             except Exception:
                 raise PreparationError("R2 could not initialise its S3 client. Check the local storage packages and server-only configuration.") from None
         self.client = client
 
     def _call(self, operation, allow_missing=False, **kwargs):
+        operations = {"head_bucket": "HeadBucket", "get_object": "GetObject", "head_object": "HeadObject", "put_object": "PutObject", "list_objects_v2": "ListObjectsV2"}
+        if operation not in operations:
+            raise PreparationError("This R2 operation is not authorised by the quota controller.")
+        self.quota.reserve(operations[operation], kwargs.get("Key") if operation == "put_object" else None,
+                           kwargs.get("ContentLength", 0) if operation == "put_object" else 0)
         try:
             response = getattr(self.client, operation)(**kwargs)
         except Exception as error:
@@ -103,8 +112,8 @@ class R2Storage:
         size = local_path.stat().st_size
         if not 0 < size <= MAX_SINGLE_PUT_BYTES:
             raise PreparationError("R2 chapter uploads must be non-empty files no larger than the 5 GiB single-request limit.")
-        if content_type not in ("audio/ogg", "audio/mpeg", "application/json", "application/gzip"):
-            raise PreparationError("Use an approved audiobook or manifest content type for R2 uploads.")
+        if content_type not in ("audio/ogg", "audio/mpeg", "application/json", "application/gzip", "application/epub+zip", "application/pdf"):
+            raise PreparationError("Use an approved ebook, audiobook or manifest content type for R2 uploads.")
         if file_digest(local_path) != expected_hash:
             raise PreparationError("The local upload file changed after validation.")
         if self._existing_matches(object_path, expected_hash):
@@ -116,4 +125,4 @@ class R2Storage:
         with local_path.open("rb") as body:
             self._call("put_object", Bucket=self.bucket, Key=object_path, Body=body,
                        ContentLength=size, ContentType=content_type,
-                       CacheControl="private, max-age=31536000, immutable", IfNoneMatch="*")
+                       CacheControl="private, max-age=31536000, immutable", IfNoneMatch="*", StorageClass="STANDARD")

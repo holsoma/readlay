@@ -21,6 +21,13 @@ import upload_audiobook
 ACCOUNT, ACCESS, SECRET = "a" * 32, "b" * 32, "c" * 64
 
 
+class FakeQuota:
+    def __init__(self):
+        self.calls = []
+    def reserve(self, operation, key=None, size=0):
+        self.calls.append((operation, key, size))
+
+
 class S3Error(Exception):
     def __init__(self, code, message="SDK PRIVATE SIGNED REQUEST AND SECRET"):
         super().__init__(message)
@@ -62,7 +69,7 @@ class FakeS3:
 
 class R2StorageTests(unittest.TestCase):
     def storage(self, client=None):
-        return R2Storage(ACCOUNT, ACCESS, SECRET, "readlay-audio", True, client or FakeS3())
+        return R2Storage(ACCOUNT, ACCESS, SECRET, "readlay-audio", True, client or FakeS3(), quota=FakeQuota())
 
     def test_private_confirmation_and_r2_bucket_names_are_strict(self):
         for confirmation in (False, None, "true", 1):
@@ -184,7 +191,7 @@ class R2StorageTests(unittest.TestCase):
                 client = FakeS3()
                 client.corrupt = corrupt_type
                 def storage_factory(*settings):
-                    return R2Storage(*settings, client=client)
+                    return R2Storage(*settings, client=client, quota=FakeQuota())
                 with self.subTest(corrupt_type=corrupt_type), patch.object(upload_audiobook, "upload_plan", return_value=(manifest, plan, root)), patch("audio.r2_storage.R2Storage", side_effect=storage_factory), patch.dict(os.environ, environment):
                     self.assertEqual(upload_audiobook.main([str(manifest_path), "--storage", "r2", "--private-bucket-confirmed"]), 1)
                 self.assertEqual((publication.read_bytes(), receipt.read_bytes()), originals)

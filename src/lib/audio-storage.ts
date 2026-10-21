@@ -1,6 +1,4 @@
 import "server-only";
-import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export type AudioStorageProvider = "supabase" | "r2";
 export type AudioStorageDestination = { provider: AudioStorageProvider; origin: string; bucket: string };
@@ -43,15 +41,7 @@ export async function createSignedAudioUrl(destination: AudioStorageDestination,
   if (configured.origin !== destination.origin || configured.bucket !== destination.bucket) throw new AudioStorageError("Audio storage is not configured.");
   const expiresIn = Math.min(86400, Math.max(3600, Math.ceil(durationSeconds / 0.75) + 900));
   if (destination.provider === "r2") {
-    const accessKeyId = process.env.R2_ACCESS_KEY_ID?.trim();
-    const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY?.trim();
-    if (!accessKeyId || !secretAccessKey) throw new AudioStorageError("Audio storage is not configured.");
-    const client = new S3Client({ region: "auto", endpoint: destination.origin, forcePathStyle: true, credentials: { accessKeyId, secretAccessKey } });
-    try {
-      const signed = new URL(await getSignedUrl(client, new GetObjectCommand({ Bucket: destination.bucket, Key: audioPath }), { expiresIn }));
-      if (signed.origin !== destination.origin || decodeURIComponent(signed.pathname) !== `/${destination.bucket}/${audioPath}` || signed.username || signed.password || !signed.searchParams.get("X-Amz-Signature") || signed.searchParams.get("X-Amz-Expires") !== String(expiresIn)) throw new AudioStorageError("The audio file could not be opened.");
-      return signed.href;
-    } finally { client.destroy(); }
+    throw new AudioStorageError("R2 playback must use the authenticated, quota-checked stream.");
   }
   const secret = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!secret) throw new AudioStorageError("Audio storage is not configured.");

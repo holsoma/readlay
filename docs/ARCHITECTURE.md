@@ -10,7 +10,9 @@ flowchart TD
   Align --> Chapters[Chapter Opus and word timestamps with EPUB CFIs]
   Chapters --> Storage[Private Supabase Storage or optional private R2]
   Chapters --> Manifests[Compressed timing manifests on the website server]
-  Storage --> Player[Browser audio player]
+  Storage --> AudioRoute[Authenticated audio route]
+  AudioRoute --> Player[Browser audio player]
+  Quota[Supabase R2 quota reservations] --> AudioRoute
   Manifests --> Player
   Text --> Reader[Next.js ebook reader]
   EPUB --> Presentation[Local source structure and reviewed display repairs]
@@ -78,7 +80,7 @@ Version 1 paragraph MP3 manifests remain readable with their actual precision la
 | `GET /api/audio/<bookId>?narrator=<id>&chapter=<index>&v=<generation>` | One chapter's validated timing cues |
 | `GET /api/audio/<bookId>/stream?narrator=<id>&chapter=<index>` | Sign-in check and expiring private storage URL |
 
-Audio routes and the reader check the session before opening private files. The server validates chapter IDs, exact paragraph hashes, every source word range, CFI, cue order and object path. Stale or malformed narration is not offered. At most two validated manifests are cached per production process because deployment files are immutable; local preparation stays uncached. The browser requests one chapter's timing arrays and streams from storage after redirection, including byte-range seeking. Private API responses use `no-store`.
+Audio routes and the reader check the session before opening private files. The server validates chapter IDs, exact paragraph hashes, every source word range, CFI, cue order and object path. Stale or malformed narration is not offered. At most two validated manifests are cached per production process because deployment files are immutable; local preparation stays uncached. The browser requests one chapter's timing arrays. R2 audio streams through the authenticated server route, with each GET or HEAD reserved against the Supabase quota service before the S3 request. Legacy Supabase audio keeps its existing private redirect. Both support byte-range seeking. Private API responses use `no-store`.
 
 The Supabase service key stays on the server. GitHub controls who receives an audio URL; there is no second browser authentication system. Expiring URLs are bearer links and remain usable until expiry. Local preview can use authenticated range streaming with `AUDIO_STORAGE_MODE=local`; Vercel disables this branch.
 
@@ -112,10 +114,13 @@ Damaged EPUB text can produce tokens that neither dictionary recognises. Reviewe
 
 The Vercel build applies the versioned database migration before Next.js, keeping database credentials in Vercel. Private book JSON, reader presentation manifests, validated illustrations and audio manifests are traced into their relevant server functions. Python, Pillow, model weights and generated audio remain outside deployment.
 
-Generation and upload are operator commands, never production requests. Partial generation records its chapter coverage. Deploy manifests after their immutable Opus objects upload. Supabase remains the existing private storage service. Optional private R2 uses S3 credentials and short-lived signed URLs through the same GitHub-protected audio routes. Each publication receipt binds its own provider, origin and bucket, so a new default does not redirect existing Supabase recordings. The uploader reuses matching immutable objects and verifies uploaded hashes. Storage and bandwidth remain subject to the provider's free allowances, even though narration and alignment use no paid API. R2's included usage is not a hard spending cap, and activation may require billing details. Local caches have no automatic expiry; retain backups if permanent recovery is required.
+Generation and upload are operator commands, never production requests. Partial generation records its chapter coverage. Deploy manifests after their immutable Opus objects upload. Each publication receipt binds its own provider, origin and bucket, so a new default does not redirect existing Supabase recordings. Private R2 uses server-only S3 credentials and a quota-checked playback route. Its local uploader obtains server-side Supabase authorisation before each S3 attempt, reuses matching immutable objects and verifies uploaded hashes. SDK retries are disabled so no attempt can bypass reservation. Storage and bandwidth remain subject to the providers' allowances, even though narration and alignment use no paid API. R2's included usage is not a hard spending cap, and activation may require billing details. Local caches have no automatic expiry; retain backups if permanent recovery is required.
 
 `generate_audiobook_catalogue.py` runs a chapter at a time for both selected voices, reuses warmed local models, and keeps private error details and checkpoints in a separate unpublished staging tree. It cannot overwrite the website's active audiobook directory. Edition-bound reader corrections apply to narration and acoustic alignment while retaining every original source word range and CFI. Ambiguous source damage stops the affected chapter.
 
 Male/Female switching captures the actual media time, resolves its original source word, and seeks that word in the selected recording's independent timings. It retains the existing media element, rate and play/pause state. Choices are disabled when the current chapter has no validated recording. The website serves only prepared recordings.
 
 Before deployment, `pack_audio_metadata.py` checks each active publication receipt and losslessly compresses its exact manifest bytes. Only `manifest.json.gz` and `published.json` enter the audio functions. The loader bounds decompression to 64 MiB, hashes the original decoded bytes and validates canonical source coverage. Compression reduces the full catalogue's estimated timing bundle from hundreds of megabytes to tens of megabytes without changing cue precision.
+## R2 usage protection
+
+Supabase stores server-only R2 configuration, aggregate operation reservations and pending upload bytes. This is separate from Neon's existing reading-progress data. Authenticated audio requests pass through a quota-checked stream; the website no longer issues R2 signed URLs. The trusted local uploaders reserve quota through the same service-only Supabase functions before each S3 call. A daily protected job and an admin refresh read account-wide Cloudflare analytics and complete the bucket inventory. Missing or stale observations fail closed. See [R2 usage protection](R2_USAGE_PROTECTION.md) for limits, setup, accounting and bypass limitations.

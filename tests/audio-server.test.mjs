@@ -114,9 +114,12 @@ function storeHarness({ audio = manifest(), marker, env = {}, fetch: fetchStub, 
 
 function routeHarness(store, { user = "github-user", configured = true, localBytes = Buffer.from("0123456789") } = {}) {
   const streams = [];
+  const r2 = [];
   const common = {
+    "server-only": {},
     "@/auth": { authConfigured: configured, auth: async () => user ? { user: { id: user } } : null },
     "@/lib/audio-store": store,
+    "@/lib/r2-audio": { streamR2Audio: async (...args) => { r2.push(args); return new Response("protected R2 audio", { headers: { "Referrer-Policy": "no-referrer", "Cache-Control": "private, no-store" } }); } },
     "node:fs/promises": { stat: async () => ({ size: localBytes.length }) },
     "node:fs": { createReadStream: (file, { start, end }) => {
       streams.push({ file, start, end });
@@ -127,6 +130,7 @@ function routeHarness(store, { user = "github-user", configured = true, localByt
     metadata: loadTypeScript("src/app/api/audio/[bookId]/route.ts", { stubs: common }),
     stream: loadTypeScript("src/app/api/audio/[bookId]/stream/route.ts", { stubs: common }),
     streams,
+    r2,
   };
 }
 
@@ -208,16 +212,19 @@ test("R2 mode keeps legacy Supabase publications streaming from their original d
   assert.equal(calls.fetch.length, 1);
 });
 
-test("R2 publication receipts bind signed playback to the private bucket without a Supabase request", async () => {
+test("R2 publication receipts use authenticated quota-checked streaming without a signed redirect", async () => {
   const account = "b".repeat(32);
   const storageOrigin = `https://${account}.r2.cloudflarestorage.com`;
   const audio = manifest();
   const { store, calls } = storeHarness({ audio, marker: { storageProvider: "r2", storageOrigin, bucket: "readlay-audio", generationId: audio.generationId, manifestHash: sha256(JSON.stringify(audio)) }, env: {
     AUDIO_STORAGE_MODE: "r2", R2_ACCOUNT_ID: account, R2_AUDIO_BUCKET: "readlay-audio", R2_ACCESS_KEY_ID: "test-access-id", R2_SECRET_ACCESS_KEY: "test-secret-key",
   } });
-  const response = await routeHarness(store).stream.GET(streamRequest(), context());
-  assert.equal(response.status, 307);
-  assert.equal(new URL(response.headers.get("Location")).origin, storageOrigin);
+  const routes = routeHarness(store), response = await routes.stream.GET(streamRequest(), context());
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Location"), null);
+  assert.equal(routes.r2.length, 1);
+  assert.equal(routes.r2[0][1], "github-user");
+  assert.equal(routes.r2[0][2].origin, storageOrigin);
   assert.equal(response.headers.get("Referrer-Policy"), "no-referrer");
   assert.equal(calls.fetch.length, 0);
 });
