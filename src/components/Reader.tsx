@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { ArrowLeft, ArrowRight, BookOpen, Bookmark, BookmarkCheck, Check, ChevronLeft, List, Minus, Plus, Type, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, Bookmark, BookmarkCheck, Check, ChevronLeft, CircleHelp, Hand, Headphones, Keyboard, List, MapPin, Minus, MousePointer2, Plus, Type, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type KeyboardEvent } from "react";
 import type { Book, Chapter } from "@/data/books";
 import { useReadlay } from "./ReadlayProvider";
@@ -52,6 +52,35 @@ function BookIllustration({ image, bookId }: { image: ReaderImage; bookId: strin
   const src = `/api/book-assets/${bookId}/${image.id}`;
   return <figure className="reader-illustration"><a href={src} target="_blank" rel="noopener" aria-label={`Open illustration at full size: ${image.alt}`}><Image unoptimized src={src} width={image.width} height={image.height} style={{ width: "100%", maxWidth: image.width, height: "auto", aspectRatio: `${image.width} / ${image.height}` }} alt={image.alt} loading="lazy" decoding="async" /></a>{image.caption && <figcaption>{image.caption}</figcaption>}</figure>;
 }
+
+const ReaderGuide = memo(function ReaderGuide() {
+  return <div className="reader-guide">
+    <ul className="reader-guide-steps" aria-label="Reader quick guide">
+      <li><MousePointer2 size={16} aria-hidden="true" /><span>Tap a <span className="reader-guide-sample">word</span></span></li>
+      <li><MapPin size={16} aria-hidden="true" /><span>Set place</span></li>
+      <li><Headphones size={16} aria-hidden="true" /><span>Listen</span></li>
+    </ul>
+    <details className="reader-guide-help" onKeyDown={(event) => {
+      if (event.key === "Escape" && event.currentTarget.open) {
+        event.preventDefault(); event.stopPropagation(); event.currentTarget.open = false;
+        event.currentTarget.querySelector<HTMLElement>("summary")?.focus();
+      }
+    }}>
+      <summary aria-label="Reading help" title="Reading help"><CircleHelp size={18} aria-hidden="true" /></summary>
+      <div className="reader-guide-panel">
+        <p className="reader-guide-title">Reading controls</p>
+        <ul>
+          <li><MousePointer2 size={17} aria-hidden="true" /><span><strong>Tap or double-click</strong> a word for its meaning.</span></li>
+          <li><Hand size={17} aria-hidden="true" /><span><strong>Press and hold</strong> a word on your phone.</span></li>
+          <li><MapPin size={17} aria-hidden="true" /><span><strong>Set reading place</strong> in the word popup to save that position.</span></li>
+          <li><Headphones size={17} aria-hidden="true" /><span><strong>Listen from here</strong> to continue with available audio.</span></li>
+          <li><Keyboard size={17} aria-hidden="true" /><div className="reader-guide-shortcuts"><p><kbd>←</kbd><kbd>→</kbd><span>Move word by word</span></p><p><kbd>Shift</kbd><span>+ select a word to look it up</span></p></div></li>
+        </ul>
+      </div>
+    </details>
+    <span id="reader-word-help" className="sr-only">Select a word for its meaning. Choose Set reading place to save its position or Listen from here for audio. Left and right arrow keys move between words. Shift-select looks up a word.</span>
+  </div>;
+});
 
 export default function Reader({ book, chapters, editionId, presentation }: ReaderProps) {
   return <ReaderContent key={`${book.id}:${editionId}`} book={book} chapters={chapters} editionId={editionId} presentation={presentation} />;
@@ -485,7 +514,7 @@ function ReaderContent({ book, chapters, editionId, presentation }: ReaderProps)
             <div className="reader-chapter-label">{sectionHeading.label}</div>
             <h1 id="reader-title" tabIndex={-1}>{sectionHeading.title}</h1>
             <div className="reader-chapter-rule" aria-hidden="true"><i /><i /></div>
-            <div className="reader-word-tools"><p id="reader-word-help">Tap, double-click or long-press a word for its meaning. Choose Set reading place to move there, or Listen from here to hear it. Arrow keys move your place; Shift-select looks up a word.</p><label><input type="checkbox" checked={liveHighlight} onChange={(event) => { const value = event.target.checked; setLiveHighlight(value); try { localStorage.setItem(preferencesKey, JSON.stringify({ fontSize, theme, liveHighlight: value })); } catch { /* The current session keeps this setting. */ } }} />Highlight narration</label></div>
+            <div className="reader-word-tools" onPointerUp={(event) => event.stopPropagation()}><ReaderGuide /><label><input type="checkbox" checked={liveHighlight} onChange={(event) => { const value = event.target.checked; setLiveHighlight(value); try { localStorage.setItem(preferencesKey, JSON.stringify({ fontSize, theme, liveHighlight: value })); } catch { /* The current session keeps this setting. */ } }} />Highlight narration</label></div>
             <div className="reader-prose">
               {paragraphGroups.map((group) => <div key={`group-${group.indices[0]}`} className={group.list ? "reader-list" : "reader-body-group"} role={group.list ? "list" : undefined}>{group.indices.map((index) => {
                 const text = chapter.paragraphs[index];

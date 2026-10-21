@@ -69,7 +69,7 @@ function readerHarness(progress = null, { search = "", vocabulary = [], presenta
   const context = { ready: true, bookmarks: [], isSignedIn: true, syncStatus: "synced", getProgress: () => progress, saveProgress: (...args) => saves.push(args), toggleBookmark() {}, openAuth() {}, notify() {} };
   const Reader = loadTypeScript("src/components/Reader.tsx", {
     extra: "\nexports.ReaderContentForTest = ReaderContent;",
-    stubs: { react, "next/link": "link", "react/jsx-runtime": { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }), Fragment: "fragment" }, "lucide-react": Object.fromEntries(["ArrowLeft", "ArrowRight", "BookOpen", "Bookmark", "BookmarkCheck", "Check", "ChevronLeft", "List", "Minus", "Plus", "Type", "X"].map((icon) => [icon, "icon"])), "./ReadlayProvider": { useReadlay: () => context }, "./WordBankProvider": { useWordBank: () => ({ words: vocabulary }) }, "./DictionaryPopup": "dictionary", "./AudiobookPlayer": "player", "@/lib/epub-location": locations, "./reader.css": {}, "./reader-content.css": {} },
+    stubs: { react, "next/link": "link", "react/jsx-runtime": { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }), Fragment: "fragment" }, "lucide-react": Object.fromEntries(["ArrowLeft", "ArrowRight", "BookOpen", "Bookmark", "BookmarkCheck", "Check", "ChevronLeft", "List", "Minus", "Plus", "Type", "X", "MousePointer2", "MapPin", "Headphones", "CircleHelp", "Hand", "Keyboard"].map((icon) => [icon, "icon"])), "./ReadlayProvider": { useReadlay: () => context }, "./WordBankProvider": { useWordBank: () => ({ words: vocabulary }) }, "./DictionaryPopup": "dictionary", "./AudiobookPlayer": "player", "@/lib/epub-location": locations, "./reader.css": {}, "./reader-content.css": {} },
     globals: {
       window: { setTimeout, clearTimeout, location: { search }, getSelection: () => selection, addEventListener() {}, removeEventListener() {}, scrollTo() {} }, document, Node: { ELEMENT_NODE: 1 }, localStorage: { getItem: () => null, setItem() {} }, URLSearchParams,
       setTimeout: (fn, delay) => { const id = Symbol(); deferred.set(id, { fn, delay }); return id; }, clearTimeout: (id) => deferred.delete(id),
@@ -86,6 +86,9 @@ function readerHarness(progress = null, { search = "", vocabulary = [], presenta
     saves, scrolled, focused, deferred, settle,
     updateProgress(next, syncStatus = "synced") { progress = next; context.syncStatus = syncStatus; dirty = true; },
     player: () => find(tree, (node) => node.type === "player").props,
+    tools: () => find(tree, (node) => node.props?.className === "reader-word-tools").props,
+    article: () => find(tree, (node) => node.type === "article").props,
+    nativeSelection: () => selection,
     paragraph: (index) => { const node = find(tree, (item) => typeof item.type === "function" && item.type.name === "WordParagraph" && item.props.index === index); renderingParagraph = true; try { return node.type(node.props).props; } finally { renderingParagraph = false; } },
     dictionary: () => find(tree, (node) => node.type === "dictionary")?.props,
     tapWord(index, offset, part = 0) { const word = paragraphElements[index].words.find((item) => item.dataset.wordStart === String(offset) && item.dataset.displayKey === `${offset}:${part}`); app.paragraph(index).onClick({ target: word }); },
@@ -121,6 +124,27 @@ test("a selection spanning text nodes survives the Listen toolbar action", async
   const position = app.player().getReadingPosition(); await app.settle();
   assert.equal(position.charOffset, word.charStart);
   assert.equal(app.player().location.charOffset, word.charStart);
+});
+
+test("reader guide interaction does not reopen a lookup or discard the exact selection used by Listen", async (t) => {
+  const app = readerHarness({ chapterIndex: 0, paragraphIndex: 0, charOffset: 0 }); t.after(() => app.cleanup()); await app.settle();
+  const word = locations.wordsInText(chapters[0].paragraphs[0])[3];
+  app.selectRange(0, word.charStart, word.charEnd - word.charStart);
+  const selected = app.nativeSelection();
+  let stopped = false;
+  app.tools().onPointerUp({ stopPropagation() { stopped = true; } });
+  if (!stopped) app.article().onPointerUp();
+  await app.settle();
+  assert.equal(stopped, true, "guide and highlight controls stop the article selection handler");
+  assert.equal(app.nativeSelection(), selected, "the original native range remains available to Listen");
+  assert.equal(app.dictionary(), undefined, "Help interaction does not trigger a stale dictionary lookup");
+  assert.equal(app.saves.length, 0);
+  assert.equal(app.player().seekRequest, null);
+  assert.equal(app.player().location.charOffset, 0);
+  const position = app.player().getReadingPosition(); await app.settle();
+  assert.equal(position.charOffset, word.charStart);
+  assert.equal(position.cfi, locations.cfiForPosition(0, 0, word.charStart));
+  assert.equal(app.saves.at(-1)[4], word.charStart);
 });
 
 test("selecting a complete word resumes at that word rather than the following word", async (t) => {
