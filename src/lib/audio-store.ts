@@ -1,11 +1,14 @@
 import "server-only";
 import { createHash } from "node:crypto";
+import { Buffer } from "node:buffer";
 import { readdir, readFile } from "node:fs/promises";
+import { gunzipSync } from "node:zlib";
 import path from "node:path";
 import { books } from "@/data/books";
 import { getBookContent } from "@/lib/book-content";
-import { parseAudioManifest, type AudioManifest, type AudioNarratorSummary } from "@/lib/audio-types";
+import { narratorGender, parseAudioManifest, type AudioManifest, type AudioNarratorSummary } from "@/lib/audio-types";
 import { cfiForPosition, isTextBoundary, wordsInText } from "@/lib/epub-location";
+import { AudioStorageError, audioStorageDestination, createSignedAudioUrl, publicationStorageDestination, type AudioStorageDestination } from "@/lib/audio-storage";
 
 const safeId = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
 const root = path.join(process.cwd(), ".local", "audiobooks");
@@ -27,9 +30,10 @@ function editionFor(bookId: string) {
 // most two validated manifests per process, rather than hashing a whole book on
 // every seek. Local preparation remains uncached so operator edits are visible.
 const validatedManifests = new Map<string, Promise<AudioManifest>>();
+const publicationDestinations = new WeakMap<AudioManifest, AudioStorageDestination>();
 export async function getAudioManifest(bookId: string, narratorId: string): Promise<AudioManifest> {
   if (process.env.VERCEL !== "1") return loadAudioManifest(bookId, narratorId);
-  const key = JSON.stringify([bookId, narratorId, process.env.SUPABASE_URL, process.env.AUDIO_STORAGE_BUCKET]);
+  const key = JSON.stringify([bookId, narratorId, process.env.SUPABASE_URL, process.env.AUDIO_STORAGE_BUCKET, process.env.R2_ACCOUNT_ID, process.env.R2_AUDIO_BUCKET]);
   const existing = validatedManifests.get(key);
   if (existing) {
     validatedManifests.delete(key);
@@ -50,7 +54,14 @@ async function loadAudioManifest(bookId: string, narratorId: string): Promise<Au
   let manifestBytes: string;
   const directory = path.join(root, bookId, editionId, narratorId);
   try {
-    manifestBytes = await readFile(path.join(directory, "manifest.json"), "utf8");
+    try {
+      const compressed = await readFile(path.join(directory, "manifest.json.gz"));
+      manifestBytes = gunzipSync(compressed, { maxOutputLength: 64 * 1024 * 1024 }).toString("utf8");
+    } catch (error) {
+      if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ENOENT") throw error;
+      manifestBytes = await readFile(path.join(directory, "manifest.json"), "utf8");
+      if (Buffer.byteLength(manifestBytes, "utf8") > 64 * 1024 * 1024) throw new Error("Manifest too large");
+    }
     value = JSON.parse(manifestBytes);
   } catch {
     throw new AudioError(404, "This narration is unavailable.");
@@ -59,11 +70,12 @@ async function loadAudioManifest(bookId: string, narratorId: string): Promise<Au
   if (!manifest || manifest.bookId !== bookId || manifest.editionId !== editionId || manifest.narrator.id !== narratorId) {
     throw new AudioError(503, "This narration needs to be prepared again.");
   }
+  let storageDestination: AudioStorageDestination | null = null;
   if (process.env.AUDIO_STORAGE_MODE !== "local" || process.env.VERCEL === "1") {
     try {
       const published = JSON.parse(await readFile(path.join(directory, "published.json"), "utf8"));
-      const origin = process.env.SUPABASE_URL ? new URL(process.env.SUPABASE_URL).origin : null;
-      if (!origin || published.storageOrigin !== origin || published.bucket !== (process.env.AUDIO_STORAGE_BUCKET || "readlay-audio") ||
+      storageDestination = publicationStorageDestination(published);
+      if (!storageDestination ||
         published.generationId !== manifest.generationId || published.manifestHash !== createHash("sha256").update(manifestBytes, "utf8").digest("hex")) throw new Error("Unpublished");
     } catch {
       throw new AudioError(404, "This narration has not been uploaded.");
@@ -102,6 +114,7 @@ async function loadAudioManifest(bookId: string, narratorId: string): Promise<Au
       if (wordIndex !== chapter.words?.length) throw new AudioError(503, "The word timings do not match this edition.");
     }
   }
+  if (storageDestination) publicationDestinations.set(manifest, storageDestination);
   return manifest;
 }
 
@@ -115,10 +128,11 @@ export async function listNarrators(bookId: string): Promise<AudioNarratorSummar
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return [];
     throw error;
   }
-  const entries = await Promise.all(names.sort().map(async name => {
+  const entries = await Promise.all(names.sort().map(async (name): Promise<AudioNarratorSummary | null> => {
     try {
-      const { narrator } = await getAudioManifest(bookId, name);
-      return { id: narrator.id, name: narrator.name, language: narrator.language };
+      const { narrator, coverage } = await getAudioManifest(bookId, name);
+      const gender = narratorGender(narrator);
+      return { id: narrator.id, name: narrator.name, language: narrator.language, ...(gender ? { gender } : {}), chapterIndices: coverage.chapterIndices };
     } catch {
       // Never offer stale or partly written metadata to a reader.
       return null;
@@ -134,34 +148,10 @@ export function localAudioFile(audioPath: string): string | null {
   return resolved;
 }
 
-export async function signedAudioUrl(audioPath: string, durationSeconds: number): Promise<string> {
-  const projectUrl = process.env.SUPABASE_URL?.trim();
-  const secret = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  const bucket = process.env.AUDIO_STORAGE_BUCKET?.trim() || "readlay-audio";
-  if (!projectUrl || !secret || !safeId.test(bucket)) throw new AudioError(503, "Audio storage is not configured.");
-  let base: URL;
-  try { base = new URL(projectUrl); } catch { throw new AudioError(503, "Audio storage is not configured."); }
-  if (base.protocol !== "https:" || base.username || base.password || base.pathname !== "/") {
-    throw new AudioError(503, "Audio storage is not configured.");
-  }
-  const objectPath = `${encodeURIComponent(bucket)}/${audioPath.split("/").map(encodeURIComponent).join("/")}`;
-  const headers: Record<string, string> = { apikey: secret, "Content-Type": "application/json" };
-  // Supabase's opaque secret keys are API keys, not bearer JWTs.
-  if (!secret.startsWith("sb_secret_")) headers.Authorization = `Bearer ${secret}`;
-  const response = await fetch(new URL(`/storage/v1/object/sign/${objectPath}`, base), {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ expiresIn: Math.min(86400, Math.max(3600, Math.ceil(durationSeconds / 0.75) + 900)) }),
-    cache: "no-store",
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!response.ok) throw new AudioError(503, "The audio file could not be opened. Try again.");
-  const result: unknown = await response.json();
-  const signed = result && typeof result === "object" && "signedURL" in result ? result.signedURL : null;
-  if (typeof signed !== "string") throw new AudioError(503, "The audio file could not be opened.");
-  const target = new URL(signed.startsWith("/object/") ? `/storage/v1${signed}` : signed, base);
-  if (target.origin !== base.origin || target.pathname !== `/storage/v1/object/sign/${objectPath}` || !target.searchParams.get("token")) {
-    throw new AudioError(503, "The audio file could not be opened.");
-  }
-  return target.href;
+export async function signedAudioUrl(audioPath: string, durationSeconds: number, manifest?: AudioManifest): Promise<string> {
+  try {
+    const destination = manifest ? publicationDestinations.get(manifest) : audioStorageDestination("supabase");
+    if (!destination) throw new AudioStorageError("This narration has not been uploaded.");
+    return await createSignedAudioUrl(destination, audioPath, durationSeconds);
+  } catch (error) { throw new AudioError(503, error instanceof AudioStorageError ? error.message : "The audio file could not be opened."); }
 }

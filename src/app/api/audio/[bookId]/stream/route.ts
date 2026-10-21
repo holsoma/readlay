@@ -40,7 +40,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ book
         ...(range ? { "Content-Range": `bytes ${start}-${end}/${size}` } : {}),
       } });
     }
-    const url = await signedAudioUrl(chapter.audioPath, chapter.durationSeconds);
+    const url = await signedAudioUrl(chapter.audioPath, chapter.durationSeconds, manifest);
     return new Response(null, { status: 307, headers: { ...headers, Location: url } });
   } catch (error) {
     return Response.json({ error: error instanceof AudioError ? error.message : "Audio is temporarily unavailable." },

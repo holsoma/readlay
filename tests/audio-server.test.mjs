@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { Readable } from "node:stream";
+import { gzipSync } from "node:zlib";
 import test from "node:test";
 import { loadTypeScript, plain } from "./helpers/load-typescript.mjs";
 
@@ -161,7 +162,7 @@ test("both audio routes reject missing GitHub sessions before opening private fi
 test("prepared narration requires the current edition, exact paragraph hashes and a contained object path", async () => {
   const valid = storeHarness();
   assert.equal((await valid.store.getAudioManifest(bookId, narratorId)).generationId, "generation-one");
-  assert.deepEqual(plain(await valid.store.listNarrators(bookId)), [{ id: narratorId, name: "Alice", language: "en-GB" }]);
+  assert.deepEqual(plain(await valid.store.listNarrators(bookId)), [{ id: narratorId, name: "Alice", language: "en-GB", gender: "female", chapterIndices: [0] }]);
   for (const change of [
     (audio) => { audio.editionId = "old-edition"; },
     (audio) => { audio.chapters[0].chapterId = "another-chapter"; },
@@ -180,6 +181,54 @@ test("prepared narration requires the current edition, exact paragraph hashes an
   await rejectsStatus(store.getAudioManifest(bookId, "../Alice"), 400);
   await rejectsStatus(store.getAudioManifest("unknown-book", narratorId), 404);
   assert.equal(calls.files.length, 0);
+});
+
+test("compressed manifests retain their uncompressed publication hash and corrupt gzip cannot fall back to stale JSON", async () => {
+  const compressed = storeHarness();
+  compressed.files.set("manifest.json.gz", gzipSync(compressed.files.get("manifest.json")));
+  compressed.files.delete("manifest.json");
+  assert.equal((await compressed.store.getAudioManifest(bookId, narratorId)).generationId, "generation-one");
+  assert.equal(compressed.calls.files.some((file) => file.endsWith("manifest.json")), false);
+
+  const corrupt = storeHarness();
+  corrupt.files.set("manifest.json.gz", Buffer.from("invalid gzip"));
+  await rejectsStatus(corrupt.store.getAudioManifest(bookId, narratorId), 404);
+  assert.equal(corrupt.calls.files.some((file) => file.endsWith("manifest.json")), false);
+
+  const oversized = storeHarness();
+  oversized.files.set("manifest.json.gz", gzipSync(Buffer.alloc(64 * 1024 * 1024 + 1, 32)));
+  await rejectsStatus(oversized.store.getAudioManifest(bookId, narratorId), 404);
+});
+
+test("R2 mode keeps legacy Supabase publications streaming from their original destination", async () => {
+  const { store, calls } = storeHarness({ env: { AUDIO_STORAGE_MODE: "r2", R2_ACCOUNT_ID: "a".repeat(32), R2_AUDIO_BUCKET: "readlay-audio" }, fetch: async () => Response.json({ signedURL: `/object/sign/readlay-audio/${manifest().chapters[0].audioPath}?token=test` }) });
+  const response = await routeHarness(store).stream.GET(streamRequest(), context());
+  assert.equal(response.status, 307);
+  assert.equal(new URL(response.headers.get("Location")).origin, origin);
+  assert.equal(calls.fetch.length, 1);
+});
+
+test("R2 publication receipts bind signed playback to the private bucket without a Supabase request", async () => {
+  const account = "b".repeat(32);
+  const storageOrigin = `https://${account}.r2.cloudflarestorage.com`;
+  const audio = manifest();
+  const { store, calls } = storeHarness({ audio, marker: { storageProvider: "r2", storageOrigin, bucket: "readlay-audio", generationId: audio.generationId, manifestHash: sha256(JSON.stringify(audio)) }, env: {
+    AUDIO_STORAGE_MODE: "r2", R2_ACCOUNT_ID: account, R2_AUDIO_BUCKET: "readlay-audio", R2_ACCESS_KEY_ID: "test-access-id", R2_SECRET_ACCESS_KEY: "test-secret-key",
+  } });
+  const response = await routeHarness(store).stream.GET(streamRequest(), context());
+  assert.equal(response.status, 307);
+  assert.equal(new URL(response.headers.get("Location")).origin, storageOrigin);
+  assert.equal(response.headers.get("Referrer-Policy"), "no-referrer");
+  assert.equal(calls.fetch.length, 0);
+});
+
+test("unexpected storage failures cannot expose SDK details or credentials in the playback response", async () => {
+  const { store } = storeHarness({ fetch: async () => { throw new Error(`Private transport detail: ${secret}`); } });
+  const response = await routeHarness(store).stream.GET(streamRequest(), context());
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.equal(body.error, "The audio file could not be opened.");
+  assert.equal(JSON.stringify(body).includes(secret), false);
 });
 
 test("Supabase narration is activated only by the exact manifest bytes and matching storage destination", async () => {
@@ -315,7 +364,7 @@ test("word-aligned Opus narration covers every exact source word, including cont
   const afterEmoji = loaded.chapters[1].words[1];
   assert.equal(afterEmoji.charStart, 8, "the astral character occupies two UTF-16 code units");
   assert.equal(afterEmoji.cfi, "epubcfi(/6/4[chapter-2]!/4/2/1:8)");
-  assert.deepEqual(plain(await store.listNarrators(bookId)), [{ id: narratorId, name: "Alice", language: "en-GB" }]);
+  assert.deepEqual(plain(await store.listNarrators(bookId)), [{ id: narratorId, name: "Alice", language: "en-GB", gender: "female", chapterIndices: [0, 1] }]);
 });
 
 test("word narration rejects missing or extra lexical cues, changed source hashes and mismatched CFIs", async () => {

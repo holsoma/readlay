@@ -1936,6 +1936,14 @@
       },
       {
         "chapterIndex": 3,
+        "paragraphIndex": 111,
+        "charStart": 411,
+        "charEnd": 423,
+        "sourceText": "bodyguard600",
+        "replacementText": "bodyguard, 600"
+      },
+      {
+        "chapterIndex": 3,
         "paragraphIndex": 112,
         "charStart": 394,
         "charEnd": 397,
@@ -3373,6 +3381,14 @@
         "charEnd": 122,
         "sourceText": "inventionhe",
         "replacementText": "invention, he"
+      },
+      {
+        "chapterIndex": 7,
+        "paragraphIndex": 6,
+        "charStart": 172,
+        "charEnd": 183,
+        "sourceText": "1899Marconi",
+        "replacementText": "1899, Marconi"
       },
       {
         "chapterIndex": 7,
@@ -5013,6 +5029,22 @@
         "charEnd": 575,
         "sourceText": "die",
         "replacementText": "the"
+      },
+      {
+        "chapterIndex": 15,
+        "paragraphIndex": 51,
+        "charStart": 0,
+        "charEnd": 8,
+        "sourceText": "Napolkon",
+        "replacementText": "Napoleon"
+      },
+      {
+        "chapterIndex": 15,
+        "paragraphIndex": 51,
+        "charStart": 20,
+        "charEnd": 29,
+        "sourceText": "1769-L821",
+        "replacementText": "1769–1821"
       },
       {
         "chapterIndex": 15,
@@ -8225,6 +8257,14 @@
       {
         "chapterIndex": 25,
         "paragraphIndex": 14,
+        "charStart": 111,
+        "charEnd": 115,
+        "sourceText": "15in",
+        "replacementText": "15, in"
+      },
+      {
+        "chapterIndex": 25,
+        "paragraphIndex": 14,
         "charStart": 116,
         "charEnd": 119,
         "sourceText": "die",
@@ -8981,6 +9021,22 @@
         "charEnd": 153,
         "sourceText": "die",
         "replacementText": "the"
+      },
+      {
+        "chapterIndex": 26,
+        "paragraphIndex": 185,
+        "charStart": 10,
+        "charEnd": 20,
+        "sourceText": "BAT1ISHKBA",
+        "replacementText": "BATHSHEBA"
+      },
+      {
+        "chapterIndex": 26,
+        "paragraphIndex": 219,
+        "charStart": 15,
+        "charEnd": 22,
+        "sourceText": "2SAMUHL",
+        "replacementText": "2 SAMUEL"
       },
       {
         "chapterIndex": 26,
@@ -9845,6 +9901,14 @@
         "charEnd": 33,
         "sourceText": "ofTartary",
         "replacementText": "of Tartary"
+      },
+      {
+        "chapterIndex": 29,
+        "paragraphIndex": 27,
+        "charStart": 291,
+        "charEnd": 299,
+        "sourceText": "dinars'7",
+        "replacementText": "dinars?"
       },
       {
         "chapterIndex": 29,
@@ -15544,6 +15608,14 @@
       },
       {
         "chapterIndex": 40,
+        "paragraphIndex": 82,
+        "charStart": 456,
+        "charEnd": 460,
+        "sourceText": "him1",
+        "replacementText": "him?"
+      },
+      {
+        "chapterIndex": 40,
         "paragraphIndex": 93,
         "charStart": 276,
         "charEnd": 283,
@@ -21213,12 +21285,74 @@
     "tokens": {},
     "occurrences": [
       {
+        "chapterIndex": 0,
+        "paragraphIndex": 13,
+        "charStart": 27,
+        "charEnd": 31,
+        "sourceText": "i982",
+        "replacementText": "1982"
+      },
+      {
+        "chapterIndex": 6,
+        "paragraphIndex": 1,
+        "charStart": 157,
+        "charEnd": 159,
+        "sourceText": "8o",
+        "replacementText": "80"
+      },
+      {
+        "chapterIndex": 27,
+        "paragraphIndex": 1,
+        "charStart": 318,
+        "charEnd": 321,
+        "sourceText": "60o",
+        "replacementText": "600"
+      },
+      {
         "chapterIndex": 29,
         "paragraphIndex": 14,
         "charStart": 316,
         "charEnd": 321,
         "sourceText": "youre",
         "replacementText": "your"
+      },
+      {
+        "chapterIndex": 53,
+        "paragraphIndex": 3,
+        "charStart": 79,
+        "charEnd": 82,
+        "sourceText": "1oo",
+        "replacementText": "100"
+      },
+      {
+        "chapterIndex": 56,
+        "paragraphIndex": 3,
+        "charStart": 185,
+        "charEnd": 192,
+        "sourceText": "0fevery",
+        "replacementText": "of every"
+      }
+    ]
+  },
+  "atomic-habits": {
+    "editionId": "f499e538de3e7e0a",
+    "tokens": {},
+    "occurrences": [
+      {
+        "chapterIndex": 2,
+        "paragraphIndex": 14,
+        "charStart": 33,
+        "charEnd": 40,
+        "sourceText": "0.99365",
+        "replacementText": "0.99^365"
+      },
+      {
+        "chapterIndex": 2,
+        "paragraphIndex": 15,
+        "charStart": 34,
+        "charEnd": 41,
+        "sourceText": "1.01365",
+        "replacementText": "1.01^365"
       }
     ]
   }

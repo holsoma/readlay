@@ -4,7 +4,7 @@ import { loadTypeScript as load, plain } from "./helpers/load-typescript.mjs";
 const loadTypeScript = (relative) => load(relative.replace("../", ""));
 
 const { segmentAtTime, segmentForParagraph, seekTimeForParagraph, isManifestForEdition } = loadTypeScript("../src/lib/audio-sync.ts");
-const { parseAudioManifest, parseAudioNarrators } = loadTypeScript("../src/lib/audio-types.ts");
+const { narratorGender, parseAudioManifest, parseAudioNarrators } = loadTypeScript("../src/lib/audio-types.ts");
 const hash = "a".repeat(64);
 const segments = [
   { paragraphIndex: 0, startSeconds: 0.1, endSeconds: 3.4, textHash: hash },
@@ -89,4 +89,21 @@ test("narrator list treats no prepared recording as unavailable and rejects dupl
   assert.equal(parseAudioNarrators({ narrators: [voice, voice] }), null);
   assert.equal(parseAudioNarrators({ narrators: [{ ...voice, id: "../secret" }] }), null);
   assert.equal(parseAudioNarrators({}), null);
+});
+
+test("voice descriptions accept explicit gender and verified chapter coverage while retaining old Kokoro manifests", () => {
+  const voice = { id: "kokoro-am_michael", name: "Michael", language: "en-US", gender: "male", chapterIndices: [0, 2, 4] };
+  assert.deepEqual(plain(parseAudioNarrators({ narrators: [voice] })), [voice]);
+  assert.equal(narratorGender(voice), "male");
+  assert.equal(narratorGender({ id: "kokoro-af_heart", name: "Heart", language: "en-US" }), "female");
+  assert.equal(narratorGender({ id: "custom", name: "Narrator", language: "en-GB", voice: "bm_george" }), "male");
+  assert.equal(narratorGender({ id: "custom", name: "Narrator", language: "en-GB" }), undefined);
+  for (const patch of [{ gender: "unknown" }, { chapterIndices: [0, 0] }, { chapterIndices: [2, 1] }, { chapterIndices: [-1] }, { chapterIndices: [0.5] }]) {
+    assert.equal(parseAudioNarrators({ narrators: [{ ...voice, ...patch }] }), null);
+  }
+  const audio = manifest();
+  audio.narrator.gender = "female";
+  assert.ok(parseAudioManifest(audio));
+  audio.narrator.gender = "invalid";
+  assert.equal(parseAudioManifest(audio), null);
 });

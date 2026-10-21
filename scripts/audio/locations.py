@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import tempfile
 import zipfile
@@ -12,6 +13,7 @@ from .core import PreparationError, file_digest
 
 LOCATION_SCHEME = "readlay-canonical-epub-v1"
 WORD_PATTERN = re.compile(r"\d+(?:[,.]\d+)+|[^\W_]+(?:['’\-‐‑][^\W_]+)*", re.UNICODE)
+SOURCE_MAPPING_VERSION = "readlay-reviewed-source-map-v1"
 
 
 def xml_text(text: str) -> str:
@@ -30,6 +32,98 @@ def source_words(text: str) -> list[dict]:
     return [{"text": match.group(), "start": match.start(), "end": match.end(),
              "charStart": utf16_offset(text, match.start()), "charEnd": utf16_offset(text, match.end())}
             for match in WORD_PATTERN.finditer(text)]
+
+
+def reviewed_corrections(text: str, values: object) -> list[dict]:
+    """Accept only whole original tokens with the reader's exact UTF-16 ranges.
+
+    Audio preparation fails on stale or malformed corrections instead of
+    quietly narrating text that differs from the prepared reading interface.
+    """
+    if not isinstance(values, list) or len(values) > 1000:
+        raise PreparationError("Reader corrections must be a list of at most 1,000 reviewed token changes.")
+    words = {(word["charStart"], word["charEnd"]): word for word in source_words(text)}
+    result, seen = [], set()
+    for value in values:
+        if not isinstance(value, dict):
+            raise PreparationError("A reviewed reader correction is not an object.")
+        start, end = value.get("charStart"), value.get("charEnd")
+        if type(start) is not int or type(end) is not int or (start, end) not in words or start in seen:
+            raise PreparationError("A reviewed correction does not cover one complete original source word.")
+        original, replacement = value.get("sourceText"), value.get("replacementText")
+        try:
+            valid_text = all(isinstance(item, str) and len(item.encode("utf-16-le")) // 2 <= 200 and
+                             not re.search(r"[<>\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", item) for item in (original, replacement))
+        except UnicodeError:
+            valid_text = False
+        if not valid_text:
+            raise PreparationError("A reviewed correction contains invalid source or replacement text.")
+        if original != words[start, end]["text"] or not replacement.strip() or not 1 <= len(source_words(replacement)) <= 6:
+            raise PreparationError("A reviewed correction differs from its original source token or has no supported replacement words.")
+        seen.add(start)
+        result.append({"charStart": start, "charEnd": end, "sourceText": original, "replacementText": replacement})
+    return sorted(result, key=lambda item: item["charStart"])
+
+
+def load_reader_corrections(book: dict, book_id: str, path: Path | None) -> dict[tuple[int, int], list[dict]]:
+    """Read speech changes only; images, headings and paths are not audio inputs."""
+    if path is None:
+        return {}
+    try:
+        if path.stat().st_size > 8 * 1024 * 1024:
+            raise PreparationError("The reader presentation manifest exceeds the preparation limit.")
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as error:
+        raise PreparationError("The reader presentation manifest must be readable UTF-8 JSON.") from error
+    if not isinstance(data, dict) or type(data.get("version")) is not int or data["version"] != 1 or data.get("bookId") != book_id or data.get("editionId") != book["editionId"] or not isinstance(data.get("chapters"), list) or len(data["chapters"]) != len(book["chapters"]):
+        raise PreparationError("The reader presentation manifest does not match the canonical book and edition.")
+    result = {}
+    for chapter_index, chapter in enumerate(data["chapters"]):
+        if not isinstance(chapter, dict) or not isinstance(chapter.get("paragraphs"), dict):
+            raise PreparationError("The reader presentation has invalid chapter metadata.")
+        paragraphs = book["chapters"][chapter_index]["paragraphs"]
+        for key, settings in chapter["paragraphs"].items():
+            if not isinstance(settings, dict):
+                raise PreparationError("The reader presentation has invalid paragraph metadata.")
+            if "corrections" not in settings:
+                continue
+            if not isinstance(key, str) or not re.fullmatch(r"0|[1-9]\d*", key) or int(key) >= len(paragraphs):
+                raise PreparationError("A reviewed correction references a missing source paragraph.")
+            paragraph_index = int(key)
+            changes = reviewed_corrections(paragraphs[paragraph_index], settings["corrections"])
+            if changes:
+                result[chapter_index, paragraph_index] = changes
+    return result
+
+
+def corrected_source(text: str, corrections: list[dict]) -> tuple[str, list[dict]]:
+    """Return visible text and each untouched canonical token's display span."""
+    changes = {item["charStart"]: item for item in reviewed_corrections(text, corrections)}
+    parts, mapped, cursor, display_cursor = [], [], 0, 0
+    for word in source_words(text):
+        separator = text[cursor:word["start"]]
+        parts.append(separator)
+        display_cursor += len(separator)
+        shown = changes.get(word["charStart"], {}).get("replacementText", word["text"])
+        mapped.append({**word, "displayStart": display_cursor, "displayEnd": display_cursor + len(shown)})
+        parts.append(shown)
+        display_cursor += len(shown)
+        cursor = word["end"]
+    parts.append(text[cursor:])
+    return "".join(parts), mapped
+
+
+def sentence_corrections(text: str, start: int, end: int, corrections: list[dict]) -> list[dict]:
+    """Move paragraph ranges into a source sentence without truncating a token."""
+    offset, limit = utf16_offset(text, start), utf16_offset(text, end)
+    result = []
+    for change in corrections:
+        if change["charEnd"] <= offset or change["charStart"] >= limit:
+            continue
+        if change["charStart"] < offset or change["charEnd"] > limit:
+            raise PreparationError("A sentence boundary truncates a reviewed source correction.")
+        result.append({**change, "charStart": change["charStart"] - offset, "charEnd": change["charEnd"] - offset})
+    return result
 
 
 def canonical_cfi(chapter_index: int, paragraph_index: int, char_offset: int) -> str:

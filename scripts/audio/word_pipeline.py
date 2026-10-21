@@ -15,12 +15,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .core import SAMPLE_RATE, PreparationError, atomic_json, canonical_json, child_path, digest_text, file_digest, probe_duration, read_book, require_encoder, select_chapters, text_book
-from .locations import LOCATION_SCHEME, canonical_cfi, source_words, utf16_offset, write_canonical_epub
-from .word_alignment import MINIMUM_MEAN_CONFIDENCE, MINIMUM_WORD_CONFIDENCE, spoken_sentence
+from .locations import LOCATION_SCHEME, SOURCE_MAPPING_VERSION, canonical_cfi, corrected_source, load_reader_corrections, sentence_corrections, source_words, utf16_offset, write_canonical_epub
+from .word_alignment import AcousticAlignmentError, MINIMUM_MEAN_CONFIDENCE, MINIMUM_WORD_CONFIDENCE, spoken_sentence
 
 PIPELINE_VERSION = "readlay-word-audio-v2.5"
 MINIMUM_SENTENCE_CONTEXT = 40
 SENTENCE_BOUNDARY_VERSION = 2
+CONTEXT_FALLBACK_VERSION = "measured-source-context-v1"
+CONTEXT_SOURCE_CHARS = 120
 
 
 def sentence_chunks(text: str, max_chars: int) -> list[tuple[int, int]]:
@@ -64,10 +66,43 @@ def sentence_chunks(text: str, max_chars: int) -> list[tuple[int, int]]:
     return grouped
 
 
-def cached_sentence(text: str, provider, aligner, cache_root: Path) -> tuple[Path, int, list[dict]]:
-    spoken, mapped = spoken_sentence(text)
-    key = digest_text(canonical_json({"pipeline": PIPELINE_VERSION, "provider": provider.fingerprint,
-                                    "spoken": spoken, "textHash": digest_text(text)}).decode())
+def spoken_source_sentence(text: str, corrections: list[dict] | None = None) -> tuple[str, list[dict]]:
+    """Align reviewed speech to original words, including one-to-many repairs.
+
+    The acoustic aligner sees the same corrected transcript as Kokoro. Each
+    canonical source token owns every spoken label in its replacement, so a
+    joined source token receives one measured cue spanning its full expansion.
+    """
+    if not corrections:
+        return spoken_sentence(text)
+    display, canonical = corrected_source(text, corrections)
+    spoken, visible = spoken_sentence(display)
+    mapped, position = [], 0
+    for source in canonical:
+        owned = []
+        while position < len(visible) and visible[position]["start"] < source["displayEnd"]:
+            word = visible[position]
+            if word["start"] < source["displayStart"] or word["end"] > source["displayEnd"]:
+                raise PreparationError("A reviewed replacement cannot be mapped to one original source token.")
+            owned.append(word)
+            position += 1
+        if not owned:
+            raise PreparationError("A reviewed source token has no spoken alignment words.")
+        mapped.append({key: source[key] for key in ("text", "start", "end", "charStart", "charEnd")} |
+                      {"spokenStart": owned[0]["spokenStart"], "spokenEnd": owned[-1]["spokenEnd"]})
+    if position != len(visible):
+        raise PreparationError("The corrected transcript contains words outside the canonical source mapping.")
+    return spoken, mapped
+
+
+def cached_sentence(text: str, provider, aligner, cache_root: Path, corrections: list[dict] | None = None) -> tuple[Path, int, list[dict]]:
+    spoken, mapped = spoken_source_sentence(text, corrections)
+    cache_config = {"pipeline": PIPELINE_VERSION, "provider": provider.fingerprint,
+                    "spoken": spoken, "textHash": digest_text(text)}
+    if corrections:
+        cache_config["sourceMapping"] = {"version": SOURCE_MAPPING_VERSION,
+                                         "sha256": hashlib.sha256(canonical_json(corrections)).hexdigest()}
+    key = digest_text(canonical_json(cache_config).decode())
     path = child_path(cache_root, "sentences", key[:2], key + ".wav")
     record_path = path.with_suffix(".json")
     record, count = {}, 0
@@ -117,7 +152,7 @@ def cached_sentence(text: str, provider, aligner, cache_root: Path) -> tuple[Pat
             pass
     words = aligner.align(path, spoken, mapped) if mapped else []
     if not valid_words(words, mapped, count / SAMPLE_RATE):
-        raise PreparationError("The acoustic alignment does not cover every exact source word in order. No estimated cues were saved.")
+        raise AcousticAlignmentError("The acoustic alignment does not cover every exact source word in order. No estimated cues were saved.")
     atomic_json(alignment_path, {"audioSha256": record["sha256"], "alignmentKey": alignment_key,
                                 "wordsSha256": hashlib.sha256(canonical_json(words)).hexdigest(), "words": words})
     return path, count, words
@@ -140,6 +175,159 @@ def valid_words(words: object, mapped: list[dict], duration: float) -> bool:
     if words and sum(word["confidence"] for word in words) / len(words) < MINIMUM_MEAN_CONFIDENCE:
         return False
     return True
+
+
+def source_context(chapter: dict, chapter_index: int, paragraph_index: int, start: int, end: int, corrections: dict, context_chars: int = CONTEXT_SOURCE_CHARS) -> tuple[str, list[dict], int, int]:
+    """Bounded whole source words around a candidate, with exact local repairs."""
+    paragraphs = chapter["paragraphs"]
+
+    def edge(index: int, lo: int, hi: int, budget: int, before: bool):
+        text = paragraphs[index]
+        words = [word for word in source_words(text) if lo <= word["start"] and word["end"] <= hi]
+        if before:
+            words = [word for word in words if word["start"] >= hi - budget]
+            if not words:
+                return None
+            lo = words[0]["start"]
+        else:
+            words = [word for word in words if word["end"] <= lo + budget]
+            if not words:
+                return None
+            bound, hi = min(hi, lo + budget), words[-1]["end"]
+            while hi < bound and text[hi] in ".,!?;:'\"”’)] ":
+                hi += 1
+            stops = [match.end() for match in re.finditer(r"[.!?][\"'”’)]*(?:\s+|$)", text[lo:hi]) if match.end() >= 30]
+            if stops:
+                hi = lo + stops[-1]
+        return index, lo, hi
+
+    before, after = [], []
+    remaining = context_chars
+    for index in range(paragraph_index, max(-1, paragraph_index - 4), -1):
+        hi = start if index == paragraph_index else len(paragraphs[index])
+        piece = edge(index, 0, hi, remaining, True)
+        if piece:
+            before.insert(0, piece)
+            remaining -= piece[2] - piece[1] + 1
+            if piece[1] > 0:
+                break
+        elif source_words(paragraphs[index][:hi]):
+            break
+        if remaining <= 0:
+            break
+    remaining = context_chars
+    for index in range(paragraph_index, min(len(paragraphs), paragraph_index + 4)):
+        lo = end if index == paragraph_index else 0
+        piece = edge(index, lo, len(paragraphs[index]), remaining, False)
+        if piece:
+            after.append(piece)
+            remaining -= piece[2] - piece[1] + 1
+            if piece[2] < len(paragraphs[index]):
+                break
+        elif source_words(paragraphs[index][lo:]):
+            break
+        if remaining <= 0:
+            break
+    if not before and not after:
+        raise AcousticAlignmentError("No bounded neighbouring source words are available for measured context recovery.")
+    parts, changes, cursor = [], [], 0
+    candidate_start = candidate_end = 0
+    pieces = before + [(paragraph_index, start, end)] + after
+    for piece_index, (index, lo, hi) in enumerate(pieces):
+        if parts:
+            parts.append(" ")
+            cursor += 1
+        if piece_index == len(before):
+            candidate_start = cursor
+        source = paragraphs[index]
+        for change in sentence_corrections(source, lo, hi, corrections.get((chapter_index, index), [])):
+            offset = utf16_offset("".join(parts), cursor)
+            changes.append({**change, "charStart": change["charStart"] + offset, "charEnd": change["charEnd"] + offset})
+        part = source[lo:hi]
+        parts.append(part)
+        cursor += len(part)
+        if piece_index == len(before):
+            candidate_end = cursor
+    return "".join(parts), changes, candidate_start, candidate_end
+
+
+def cached_context_sentence(text: str, context: str, changes: list[dict], start: int, end: int, provider, aligner, cache_root: Path) -> tuple[Path, int, list[dict]]:
+    """Keep target speech between measured context-word boundaries only."""
+    if context[start:end] != text:
+        raise PreparationError("The context recipe differs from its exact target source.")
+    full_path, full_frames, aligned = cached_sentence(context, provider, aligner, cache_root, changes)
+    offset, limit = utf16_offset(context, start), utf16_offset(context, end)
+    selected = [word for word in aligned if offset <= word["charStart"] and word["charEnd"] <= limit]
+    expected = source_words(text)
+    if not selected or [(word["charStart"] - offset, word["charEnd"] - offset) for word in selected] != [(word["charStart"], word["charEnd"]) for word in expected]:
+        raise AcousticAlignmentError("The context recording does not contain every exact candidate source word.")
+    preceding = [word for word in aligned if word["charEnd"] <= offset]
+    following = [word for word in aligned if word["charStart"] >= limit]
+    first_frame = math.floor(preceding[-1]["endSeconds"] * SAMPLE_RATE) if preceding else 0
+    last_frame = math.ceil(following[0]["startSeconds"] * SAMPLE_RATE) if following else full_frames
+    frames = last_frame - first_frame
+    if not 0 <= first_frame < last_frame <= full_frames:
+        raise AcousticAlignmentError("The measured context boundaries do not form a valid candidate clip.")
+    words = [{**word, "charStart": word["charStart"] - offset, "charEnd": word["charEnd"] - offset,
+              "startSeconds": word["startSeconds"] - first_frame / SAMPLE_RATE,
+              "endSeconds": word["endSeconds"] - first_frame / SAMPLE_RATE} for word in selected]
+    if not valid_words(words, expected, frames / SAMPLE_RATE):
+        raise AcousticAlignmentError("The measured context clip failed unchanged confidence, order or exact source coverage checks.")
+    recipe = {"algorithm": CONTEXT_FALLBACK_VERSION, "contextSourceHash": digest_text(context), "targetSourceHash": digest_text(text),
+              "contextAudioSha256": file_digest(full_path), "contextWordsSha256": hashlib.sha256(canonical_json(aligned)).hexdigest(),
+              "targetPythonStart": start, "targetPythonEnd": end, "firstFrame": first_frame, "lastFrame": last_frame,
+              "sourceMappingSha256": hashlib.sha256(canonical_json(changes)).hexdigest(), "aligner": aligner.fingerprint}
+    key = hashlib.sha256(canonical_json(recipe)).hexdigest()
+    path = child_path(cache_root, "contextual", key[:2], key + ".wav")
+    record_path = path.with_suffix(".json")
+    if path.is_file() and record_path.is_file():
+        try:
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+            with wave.open(str(path), "rb") as handle:
+                valid_audio = (handle.getframerate(), handle.getnchannels(), handle.getsampwidth(), handle.getnframes()) == (SAMPLE_RATE, 1, 2, frames)
+            if valid_audio and record.get("recipe") == recipe and record.get("sha256") == file_digest(path) and record.get("words") == words:
+                return path, frames, words
+        except (OSError, ValueError, EOFError, wave.Error):
+            pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".wav", delete=False) as temporary:
+        temporary_path = Path(temporary.name)
+    try:
+        with wave.open(str(full_path), "rb") as original, wave.open(str(temporary_path), "wb") as clipped:
+            clipped.setparams((1, 2, SAMPLE_RATE, 0, "NONE", "not compressed"))
+            original.setpos(first_frame)
+            remaining = frames
+            while remaining:
+                count = min(32768, remaining)
+                block = original.readframes(count)
+                if len(block) != count * 2:
+                    raise PreparationError("The verified context recording changed while clipping.")
+                clipped.writeframesraw(block)
+                remaining -= count
+        temporary_path.replace(path)
+        atomic_json(record_path, {"recipe": recipe, "frames": frames, "sha256": file_digest(path), "words": words})
+    finally:
+        temporary_path.unlink(missing_ok=True)
+    return path, frames, words
+
+
+def recover_sentence(chapter: dict, chapter_index: int, paragraph_index: int, start: int, end: int, corrections: dict, provider, aligner, cache_root: Path):
+    """Try normal cached narration first; only acoustic failures need context."""
+    text = chapter["paragraphs"][paragraph_index]
+    changes = sentence_corrections(text, start, end, corrections.get((chapter_index, paragraph_index), []))
+    try:
+        return cached_sentence(text[start:end], provider, aligner, cache_root, changes)
+    except AcousticAlignmentError:
+        print(f"Retrying chapter {chapter_index + 1}, paragraph {paragraph_index + 1} with bounded source context and measured audio boundaries.", flush=True)
+        last_error = None
+        for context_chars in (CONTEXT_SOURCE_CHARS, 80, 40):
+            try:
+                context, context_changes, target_start, target_end = source_context(chapter, chapter_index, paragraph_index, start, end, corrections, context_chars)
+                return cached_context_sentence(text[start:end], context, context_changes, target_start, target_end, provider, aligner, cache_root)
+            except AcousticAlignmentError as error:
+                last_error = error
+        assert last_error
+        raise last_error
 
 
 def encode_opus(chunks: list[tuple[Path, int, int]], output: Path, ffmpeg: str, ffprobe: str, bitrate: str) -> tuple[int, float]:
@@ -218,6 +406,11 @@ def generate_word_audio(args, rights_record, provider_factory=None, aligner_fact
     book = text_book(args.input, args.edition_id, args.title) if args.input.suffix.lower() == ".txt" else read_book(args.input)
     if args.input.suffix.lower() != ".txt" and (args.edition_id or args.title):
         raise PreparationError("Structured input already supplies its edition ID and chapter titles.")
+    presentation = getattr(args, "reader_presentation", None)
+    if presentation is None and args.input.suffix.lower() == ".json" and args.input.parent.name == "books":
+        sibling = args.input.parent.parent / "reader" / f"{args.book_id}.json"
+        presentation = sibling if sibling.exists() else None
+    corrections = load_reader_corrections(book, args.book_id, presentation)
     selected = select_chapters(args.chapters, len(book["chapters"]))
     count = sum(len(sentence_chunks(text, args.max_chars)) for index in selected for text in book["chapters"][index]["paragraphs"])
     print(f"Book {args.book_id}; edition {book['editionId']}; {len(selected)}/{len(book['chapters'])} chapters; {count} sentence chunks.", flush=True)
@@ -229,7 +422,7 @@ def generate_word_audio(args, rights_record, provider_factory=None, aligner_fact
         for paragraph_index, text in enumerate(book["chapters"][chapter_index]["paragraphs"]):
             for start, end in sentence_chunks(text, args.max_chars):
                 try:
-                    spoken_sentence(text[start:end])
+                    spoken_source_sentence(text[start:end], sentence_corrections(text, start, end, corrections.get((chapter_index, paragraph_index), [])))
                 except PreparationError as error:
                     raise PreparationError(f"Chapter {chapter_index + 1}, paragraph {paragraph_index + 1}: {error}") from error
     ffmpeg, ffprobe = require_encoder()
@@ -248,8 +441,15 @@ def generate_word_audio(args, rights_record, provider_factory=None, aligner_fact
               "maxChars": args.max_chars, "paragraphGapMs": args.paragraph_gap_ms, "bitrate": args.bitrate,
               "sampleRate": SAMPLE_RATE, "format": "opus", "locationScheme": LOCATION_SCHEME,
               "minimumSentenceContext": MINIMUM_SENTENCE_CONTEXT,
+              "contextFallback": CONTEXT_FALLBACK_VERSION, "contextSourceChars": CONTEXT_SOURCE_CHARS,
               "sentenceBoundaryVersion": SENTENCE_BOUNDARY_VERSION,
               "sourceHash": hashlib.sha256(canonical_json(book)).hexdigest(), "encoderVersion": version.stdout.splitlines()[0], "encoderBitexact": True}
+    if corrections:
+        mapping = [{"chapterIndex": chapter, "paragraphIndex": paragraph, **change}
+                   for (chapter, paragraph), changes in sorted(corrections.items()) for change in changes]
+        config["sourceMapping"] = {"version": SOURCE_MAPPING_VERSION,
+                                   "sha256": hashlib.sha256(canonical_json(mapping)).hexdigest(),
+                                   "correctionCount": len(mapping)}
     generation_id = hashlib.sha256(canonical_json(config)).hexdigest()[:24]
     base = child_path(args.output_root, args.book_id, book["editionId"], narrator_id)
     generation_base = child_path(base, generation_id)
@@ -267,7 +467,7 @@ def generate_word_audio(args, rights_record, provider_factory=None, aligner_fact
             chapters = {}
     prefix = "/".join((args.book_id, book["editionId"], narrator_id, generation_id))
     manifest = {"schemaVersion": 2, "bookId": args.book_id, "editionId": book["editionId"], "generationId": generation_id,
-                "narrator": {"id": narrator_id, "name": args.narrator_name or args.voice.replace("_", " ").title(), "engine": "kokoro", "voice": args.voice, "language": "en-US" if language == "a" else "en-GB"},
+                "narrator": {"id": narrator_id, "name": args.narrator_name or args.voice.replace("_", " ").title(), "engine": "kokoro", "voice": args.voice, "language": "en-US" if language == "a" else "en-GB", "gender": "female" if args.voice[1] == "f" else "male"},
                 "alignment": "word", "sampleRate": SAMPLE_RATE, "format": "opus", "locationScheme": LOCATION_SCHEME,
                 "canonicalEpub": {"path": prefix + "/canonical.epub", "sha256": canonical_hash},
                 "coverage": {"complete": False, "totalChapters": len(book["chapters"]), "chapterIndices": []}, "chapters": []}
@@ -286,7 +486,7 @@ def generate_word_audio(args, rights_record, provider_factory=None, aligner_fact
                 ranges = sentence_chunks(text, args.max_chars)
                 for sentence_index, (start, end) in enumerate(ranges):
                     try:
-                        audio_path, frames, aligned = cached_sentence(text[start:end], provider, aligner, args.cache_root)
+                        audio_path, frames, aligned = recover_sentence(source, chapter_index, paragraph_index, start, end, corrections, provider, aligner, args.cache_root)
                     except PreparationError as error:
                         raise PreparationError(f"Chapter {chapter_index + 1}, paragraph {paragraph_index + 1}, sentence chunk {sentence_index + 1}: {error}") from error
                     offset = utf16_offset(text, start)

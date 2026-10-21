@@ -1,0 +1,2 @@
+# Local upload tooling only. Not installed by the Next.js website.
+boto3==1.43.116

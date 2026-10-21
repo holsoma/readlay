@@ -2,7 +2,7 @@
 
 Readlay prepares audio on a local machine with Kokoro-82M. A separate acoustic model force-aligns the generated speech to the exact spoken transcript. FFmpeg combines cached sentence PCM into chapter Opus files. Private Supabase Storage holds the prepared audio and immutable timing manifests. Normal website operation needs no Python, GPU, model download or speech API.
 
-The default voice is `af_heart`, American English. British voices such as `bf_emma` are separate narrator renditions. Kokoro does not provide a native Singaporean English voice. Each voice or future engine must produce alignment from its own recording.
+The default female voice is `af_heart`; the catalogue batch also prepares the male voice `am_michael`. Both use American English. British voices such as `bf_emma` are separate narrator renditions. Kokoro does not provide a native Singaporean English voice. Each voice or future engine must produce alignment from its own recording.
 
 ## Install once
 
@@ -68,6 +68,38 @@ Chapter selections are one-based, for example `1,3-5`. Stored indices are zero-b
 Verified sentence WAVs are retained by exact source text, spoken normalisation, Kokoro model/voice hashes and provider versions. Sentence alignment is cached separately by audio SHA256 and every acoustic model and algorithm setting. Changing the aligner reuses existing narration. Model noise is seeded per text chunk. Corrupt caches are detected by hashes and structure checks. There is no expiry or automatic deletion.
 
 Completed Opus chapters and exact word cues are verified and reused without narration, alignment or encoding. Matching partial runs merge coverage. Changed source text, voice, acoustic model, chunk settings, bitrate, paragraph gap or encoder creates a different generation path. Older generation files remain available. Do not discard these preparation directories if permanent reuse is required; a free remote storage plan is not a backup guarantee.
+
+## Resumable catalogue batches
+
+The local catalogue runner prepares every imported book with the female `af_heart` and male `am_michael` voices. It uses one retained provider for each voice and one acoustic aligner across the serial batch. It starts each selected book and voice before moving to the next chapter ordinal. Generation remains local and uses the existing sentence cache.
+
+Inspect the complete plan without loading models or writing files:
+
+```powershell
+.local/audio-venv/Scripts/python.exe scripts/generate_audiobook_catalogue.py --rights-confirmed --dry-run
+```
+
+Prepare or resume all books in `.local/books`:
+
+```powershell
+.local/audio-venv/Scripts/python.exe scripts/generate_audiobook_catalogue.py --rights-confirmed --device cpu
+```
+
+Pass book IDs to prepare a selection, and `--device cuda` only on a configured CUDA machine. `--chapters` applies the same one-based chapter selection to every selected book:
+
+```powershell
+.local/audio-venv/Scripts/python.exe scripts/generate_audiobook_catalogue.py rich-dad-poor-dad subconscious-mind --chapters 1-2 --rights-confirmed
+```
+
+The operator must confirm audio preparation and distribution rights for every selected edition. `--voices` can replace the default voice pair. Models and voices must already be cached unless `--allow-download` is supplied for a one-off setup. The runner never uploads audio, changes a storage plan or deploys the website.
+
+Output defaults to `.local/audiobook-batch-output`, separate from the website's active `.local/audiobooks` tree. A custom `--output-root` must also be unpublished staging storage. The runner rejects the active tree, its ancestors and descendants, and any staging tree containing a `published.json` receipt. Existing deployed manifests and publication receipts stay unchanged.
+
+`batch-progress.json` is updated atomically before and after every chapter attempt. Private logs and error records are under `batch-logs/<bookId>/<editionId>/<voice>`. Error records include the exact source paragraph and sentence location when available. Keep the entire staging tree out of Git and website uploads. The console displays IDs, progress counts and file sizes without source text or exception contents.
+
+A failed chapter does not prevent independent chapters or voices from being prepared. Press Ctrl+C to checkpoint an interruption. Run the same command to resume: the runner retries every selected chapter through the existing verification path, reusing verified Opus files, sentence recordings and acoustic alignments. It does not trust an old success flag as a substitute for checking files. Changes to source text or reviewed spoken corrections during a run stop preparation for that book until a new plan is started. Exit codes are `0` for all selected chapters ready, `1` for setup or chapter failures, and `130` for an interruption.
+
+Review failed chapters and listen to the prepared speech before publication. Validate staged manifests with the existing uploader using `--output-root .local/audiobook-batch-output`; allow partial coverage only deliberately. After remote verification, copy only the matching base manifest and publication receipt to the active runtime tree. Batch generation itself never performs this activation.
 
 ## Sentence audio and genuine word alignment
 
@@ -149,9 +181,33 @@ python scripts/upload_audiobook.py .local/audiobooks/atomic-habits/<editionId>/k
 
 Before upload, the command verifies preparation rights, generation paths, source hashes, actual canonical EPUB structure, word coverage, CFIs, byte lengths and audio hashes. Files up to 6 MiB use standard upload; larger files use resumable TUS with 6 MiB chunks. Existing objects are downloaded and SHA256 checked before reuse. Requests never enable overwrite. Every uploaded chapter and immutable hash-named manifest is downloaded and SHA256 checked before `published.json` activates the generation. Interrupted uploads retain completed objects and resumable state.
 
-Deploy matching base `manifest.json` and `published.json` only after that verification. Audio, canonical EPUBs, sentence caches, alignment models, Python environments and preparation records stay out of Next.js. Authenticated server routes authorise the reader and return short-lived private chapter URLs. Local preview mode is explicitly separate and unavailable on Vercel.
+After upload verification, copy the complete verified narrator preparation into the active `.local/audiobooks` tree when a separate staging root was used. Run `python scripts/pack_audio_metadata.py` before building or deploying. This checks each publication hash and writes deterministic, lossless `manifest.json.gz` files. Only these compressed base manifests and their `published.json` receipts are traced into the website. Their publication hash still refers to the exact original uncompressed bytes. The loader rejects corrupt gzip and bounds decoded size to 64 MiB. Audio, canonical EPUBs, sentence caches, alignment models, Python environments and preparation records stay out of Next.js. Authenticated server routes authorise the reader and return short-lived private chapter URLs. Local preview mode is explicitly separate and unavailable on Vercel.
+
+`--gzip-manifest` also stores a compressed remote timing manifest. This requires `application/gzip` in the private Supabase bucket's MIME allowlist. Upload receipts record both the original manifest hash and compressed object hash; every remote compressed object is read back and verified before activation. The local base manifest remains readable JSON for preparation and validation.
 
 Local generation removes speech API costs. Supabase storage and transfer have finite free allowances. At a nominal 24 kbit/s, audio is roughly 10.8 MB per hour; 48 kbit/s is roughly 21.6 MB per hour. Opus variable bitrate, container overhead, pauses, metadata and additional narrators change the total. Supabase Free currently includes 1 GB of storage, shared with other stored assets. Estimate actual chapter bytes and full-book duration before a large upload, and stop when the free allowance is insufficient. The full catalogue is not guaranteed to fit. Do not enable a paid plan as an automatic fallback.
+
+## Optional private R2 storage
+
+The uploader also supports `--storage r2`. This is optional; existing Supabase publications remain valid. The publication receipt identifies the verified storage provider for each narrator, so preparing R2 credentials does not migrate or replace existing audio.
+
+R2's included monthly usage is an allowance within a usage-billed service. It is not a guaranteed hard spending cap. Cloudflare requires an R2 subscription checkout, which may require a payment method, and charges for usage above the included allowance. Do not complete that checkout, attach billing information or switch this project to R2 without the account owner's agreement. A user requiring no attached billing information can retain Supabase while local audiobook preparation continues. Check [R2 pricing](https://developers.cloudflare.com/r2/pricing/) and [account activation](https://developers.cloudflare.com/r2/get-started/) before choosing it.
+
+After an approved private bucket and object-scoped S3 credentials exist, the separate helper can prepare local fields:
+
+```powershell
+node scripts/audio/configure_r2.mjs --initialise
+```
+
+Add `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` to ignored `.env.local`. The helper preserves existing credential lines and the existing `AUDIO_STORAGE_MODE`; a missing mode defaults to `supabase`. It never adds billing information, creates a subscription, changes bucket privacy or uploads audio. Validate without printing values or changing Vercel:
+
+```powershell
+node --env-file-if-exists=.env.local scripts/audio/configure_r2.mjs --check
+```
+
+Running the helper without a flag uploads only its five approved storage fields to the existing Readlay production and preview environments. Credentials travel through standard input, child-process output is discarded, and auth, database and Supabase credentials remain unchanged. Redeployment is separate. Leave `AUDIO_STORAGE_MODE=supabase` until an R2 default is explicitly wanted and configured; a verified R2 publication receipt can select R2 independently.
+
+R2 bucket names must contain 3 to 63 lowercase letters, numbers or hyphens, starting and ending with a letter or number. Before upload, explicitly verify in Cloudflare that `r2.dev` access and public custom domains are disabled. S3 credentials cannot inspect those separate dashboard settings, so `--private-bucket-confirmed` records that operator check. The uploader uses `If-None-Match: *` to prevent overwrites and reads each uploaded chapter and manifest back for SHA256 verification before writing a publication receipt. It rejects files above R2's 5 GiB single-request limit. The uploader never creates a bucket or enables public access.
 
 ## Verification
 
@@ -181,6 +237,12 @@ The final preparation run reused retained sentence caches and took 71.813 second
 The opening Opus SHA256 is `3e2e0a164e417501a769ecf43934e7c2803f79a3d09a9a19f343b8b5bf16dc59`; the introduction hash is `27558ff19a79605735e981601ee17466a8bc3f61a11e230207f4cc2f43dae875`. Coverage remains explicitly incomplete at 2 of 28 sections. The remaining sections and other books were not generated in this acceptance run. These local checks prove preparation and cache reuse; publication and browser playback are separate deployment checks.
 
 All 28 Python pipeline/upload tests passed, including real Opus encoding, legacy MP3 behaviour, model-independent CTC path checks, exact source/CFI validation, silence and uniform-emission rejection, cached-confidence checks and unchanged-output resume.
+
+## Male and female playback verification on 21 October 2026
+
+Both voices for Atomic Habits' opening and introduction passed local word alignment and immutable private Supabase upload checks. The male introduction contains 3,082 source-word cues and lasts 1,244.950 seconds. Its new GPU narration and alignment took 68.8 seconds after model loading. The male generation is `62d4d03174754a9fe349dad7`; this is separate from the existing female generation.
+
+Live production checks confirmed that changing a paused recording maps source paragraph 38, UTF-16 range 87 to 94, to the same word in both voices. Playback at 1.5x continued through a playing voice change; paused playback stayed paused; the player retained one audio element. Test progress was restored to the account's original selected word and playback preferences were reset. This verification covers the prepared sections, not a claim that the full catalogue is complete.
 
 ## Primary references
 

@@ -32,6 +32,7 @@ def arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--language", choices=("a", "b"), help="a: American English; b: British English. Inferred from the voice by default")
     parser.add_argument("--narrator-id", help="Defaults to kokoro-<voice>")
     parser.add_argument("--narrator-name", help="Display name; defaults to the voice name")
+    parser.add_argument("--reader-presentation", type=Path, help="Edition-bound reviewed reader corrections; discovered beside structured book input by default")
     parser.add_argument("--model-revision", default="main", help="Hugging Face model revision or commit; actual asset hashes are recorded")
     parser.add_argument("--device", choices=("cpu", "cuda", "mps"), default="cpu")
     parser.add_argument("--chapters", help="One-based chapter selection, for example 1,3-5; partial coverage is recorded")
@@ -127,7 +128,7 @@ def generate_legacy(args: argparse.Namespace, provider_factory=None) -> Path | N
     manifest = {
         "schemaVersion": 1, "bookId": args.book_id, "editionId": book["editionId"],
         "generationId": generation_id,
-        "narrator": {"id": narrator_id, "name": args.narrator_name or args.voice.replace("_", " ").title(), "engine": "kokoro", "voice": args.voice, "language": "en-US" if language == "a" else "en-GB"},
+        "narrator": {"id": narrator_id, "name": args.narrator_name or args.voice.replace("_", " ").title(), "engine": "kokoro", "voice": args.voice, "gender": "female" if args.voice[1] == "f" else "male", "language": "en-US" if language == "a" else "en-GB"},
         "alignment": "paragraph", "sampleRate": SAMPLE_RATE,
         "coverage": {"complete": False, "totalChapters": len(book["chapters"]), "chapterIndices": []},
         "chapters": [],

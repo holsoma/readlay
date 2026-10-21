@@ -8,8 +8,8 @@ flowchart TD
   Kokoro --> Sentences[Sentence PCM chunks]
   Sentences --> Align[Local Wav2Vec2 CTC forced alignment]
   Align --> Chapters[Chapter Opus and word timestamps with EPUB CFIs]
-  Chapters --> Storage[Private Supabase Storage]
-  Chapters --> Manifests[Manifests on the website server]
+  Chapters --> Storage[Private Supabase Storage or optional private R2]
+  Chapters --> Manifests[Compressed timing manifests on the website server]
   Storage --> Player[Browser audio player]
   Manifests --> Player
   Text --> Reader[Next.js ebook reader]
@@ -107,4 +107,10 @@ Damaged EPUB text can produce tokens that neither dictionary recognises. Reviewe
 
 The Vercel build applies the versioned database migration before Next.js, keeping database credentials in Vercel. Private book JSON, reader presentation manifests, validated illustrations and audio manifests are traced into their relevant server functions. Python, Pillow, model weights and generated audio remain outside deployment.
 
-Generation and upload are operator commands, never production requests. Partial generation records its chapter coverage. Deploy manifests after their immutable Opus objects upload. Supabase is the existing private storage service; no second storage account is required. The uploader reuses matching immutable objects and verifies uploaded hashes. Storage and bandwidth remain subject to the provider's free allowances, even though narration and alignment use no paid API. Local caches have no automatic expiry; retain backups if permanent recovery is required.
+Generation and upload are operator commands, never production requests. Partial generation records its chapter coverage. Deploy manifests after their immutable Opus objects upload. Supabase remains the existing private storage service. Optional private R2 uses S3 credentials and short-lived signed URLs through the same GitHub-protected audio routes. Each publication receipt binds its own provider, origin and bucket, so a new default does not redirect existing Supabase recordings. The uploader reuses matching immutable objects and verifies uploaded hashes. Storage and bandwidth remain subject to the provider's free allowances, even though narration and alignment use no paid API. R2's included usage is not a hard spending cap, and activation may require billing details. Local caches have no automatic expiry; retain backups if permanent recovery is required.
+
+`generate_audiobook_catalogue.py` runs a chapter at a time for both selected voices, reuses warmed local models, and keeps private error details and checkpoints in a separate unpublished staging tree. It cannot overwrite the website's active audiobook directory. Edition-bound reader corrections apply to narration and acoustic alignment while retaining every original source word range and CFI. Ambiguous source damage stops the affected chapter.
+
+Male/Female switching captures the actual media time, resolves its original source word, and seeks that word in the selected recording's independent timings. It retains the existing media element, rate and play/pause state. Choices are disabled when the current chapter has no validated recording. The website serves only prepared recordings.
+
+Before deployment, `pack_audio_metadata.py` checks each active publication receipt and losslessly compresses its exact manifest bytes. Only `manifest.json.gz` and `published.json` enter the audio functions. The loader bounds decompression to 64 MiB, hashes the original decoded bytes and validates canonical source coverage. Compression reduces the full catalogue's estimated timing bundle from hundreds of megabytes to tens of megabytes without changing cue precision.

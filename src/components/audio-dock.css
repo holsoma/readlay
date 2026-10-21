@@ -156,8 +156,45 @@
 }
 
 .reader-page .reader-audio-dock .audio-dock-adjustments > .reader-narrator,
+.reader-page .reader-audio-dock .audio-dock-adjustments > .reader-voice-choice,
 .reader-page .reader-audio-dock .audio-dock-adjustments > .reader-narrator-name {
   margin-left: auto;
+}
+
+.reader-page .reader-audio-dock .reader-voice-choice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+  font-size: 11px;
+}
+
+.reader-page .reader-audio-dock .reader-voice-choice > span {
+  margin-right: 4px;
+  color: var(--reader-muted);
+}
+
+.reader-page .reader-audio-dock .reader-voice-choice > button {
+  min-width: 66px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--reader-line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--reader-ink);
+  font: inherit;
+}
+
+.reader-page .reader-audio-dock .reader-voice-choice > button[aria-pressed="true"] {
+  border-color: var(--reader-ink);
+  background: var(--reader-ink);
+  color: var(--reader-paper);
+}
+
+.reader-page .reader-audio-dock .reader-voice-choice > button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
 }
 
 .reader-page .reader-audio-dock .reader-narrator,
@@ -252,6 +289,11 @@
   .reader-page .reader-audio-dock .audio-dock-adjustments > .reader-narrator {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .reader-page .reader-audio-dock .audio-dock-adjustments > .reader-voice-choice {
+    width: 100%;
+    margin-left: 0;
   }
 
   .reader-page .reader-audio-dock .reader-narrator select {

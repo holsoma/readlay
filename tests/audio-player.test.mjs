@@ -47,12 +47,13 @@ function count(tree, predicate) {
 
 // Execute the component's real effects and handlers with deterministic hooks and media.
 // This checks state transitions, while the browser check covers actual audio playback.
-function playerHarness({ source = manifest, textChapters = chapters, location = { chapterIndex: 0, paragraphIndex: 0 }, selectedPosition, saveData = false, mediaResponse, delayChapter, narratorSources = [source] } = {}) {
+function playerHarness({ source = manifest, textChapters = chapters, location = { chapterIndex: 0, paragraphIndex: 0 }, selectedPosition, saveData = false, mediaResponse, delayChapter, delayIndex, delayMedia, narratorSources = [source], storedPreferences } = {}) {
   const slots = [];
   const effects = [];
   const mediaHandlers = new Map();
   const requests = [];
   const positions = [];
+  const preferences = new Map(storedPreferences ? [["readlay-audio-preferences", JSON.stringify(storedPreferences)]] : []);
   const documentListeners = new Map();
   const document = { visibilityState: "visible", addEventListener: (name, callback) => documentListeners.set(name, callback), removeEventListener: (name) => documentListeners.delete(name) };
   const blobUrls = { live: new Set(), created: [], revoked: [], peak: 0 };
@@ -90,7 +91,7 @@ function playerHarness({ source = manifest, textChapters = chapters, location = 
     duration, readyState: 1, playbackRate: 1, paused: true, ended: false, error: null, src: "", currentSrc: "",
     get currentTime() { return currentTime; },
     set currentTime(value) { currentTime = value; if (value < duration) audio.ended = false; },
-    load() { const src = audio.src; queueMicrotask(() => { audio.currentSrc = src; audio.error = null; audioProps().onLoadedMetadata(); audioProps().onCanPlay(); }); },
+    load() { const src = audio.src; audio.readyState = 0; queueMicrotask(async () => { if (delayMedia) await delayMedia(src); audio.currentSrc = src; audio.readyState = 1; audio.error = null; audioProps().onLoadedMetadata(); audioProps().onCanPlay(); }); },
     play() { audio.paused = false; audio.ended = false; audioProps().onPlaying(); return Promise.resolve(); },
     pause() { if (!audio.paused) { audio.paused = true; audioProps().onPause(); } },
   };
@@ -115,7 +116,7 @@ function playerHarness({ source = manifest, textChapters = chapters, location = 
       window: { setTimeout, clearTimeout },
       document,
       navigator: { connection: { saveData }, mediaSession: { metadata: null, setActionHandler(action, handler) { if (handler) mediaHandlers.set(action, handler); else mediaHandlers.delete(action); } } },
-      localStorage: { getItem: () => null, setItem() {} },
+      localStorage: { getItem: (key) => preferences.get(key) ?? null, setItem: (key, value) => preferences.set(key, value) },
       Blob,
       URL: class extends URL {
         static createObjectURL() { const url = `blob:readlay-test-${blobUrls.created.length + 1}`; blobUrls.created.push(url); blobUrls.live.add(url); blobUrls.peak = Math.max(blobUrls.peak, blobUrls.live.size); return url; }
@@ -126,7 +127,8 @@ function playerHarness({ source = manifest, textChapters = chapters, location = 
         if (url.includes("/stream?")) return mediaResponse ? mediaResponse(url, options) : new Response(new Uint8Array(10));
         const parsed = new URL(url, "https://readlay.test");
         const selected = narratorSources.find((item) => item.narrator.id === parsed.searchParams.get("narrator")) ?? source;
-        if (parsed.searchParams.has("chapter")) { const chapterIndex = Number(parsed.searchParams.get("chapter")); if (delayChapter) await delayChapter(chapterIndex); return Response.json(selected.chapters.find((item) => item.chapterIndex === chapterIndex)); }
+        if (parsed.searchParams.has("chapter")) { const chapterIndex = Number(parsed.searchParams.get("chapter")); if (delayChapter) await delayChapter(chapterIndex, selected.narrator.id); return Response.json(selected.chapters.find((item) => item.chapterIndex === chapterIndex)); }
+        if (parsed.searchParams.has("index") && delayIndex) await delayIndex(selected.narrator.id);
         return Response.json(parsed.searchParams.has("index") ? audioTypes.audioManifestIndex(selected) : { narrators: narratorSources.map((item) => item.narrator) });
       },
     },
@@ -149,7 +151,7 @@ function playerHarness({ source = manifest, textChapters = chapters, location = 
     if (dirty) render();
   }
   const app = {
-    audio, props, mediaHandlers, requests, positions, blobUrls, settle,
+    audio, props, mediaHandlers, requests, positions, blobUrls, settle, preferences,
     dock: () => find(tree, (node) => node.type === "section" && node.props.className.includes("reader-audio-dock")).props,
     details: () => find(tree, (node) => node.props?.className === "audio-dock-details").props,
     audioCount: () => count(tree, (node) => node.type === "audio"),
@@ -403,8 +405,8 @@ test("narrator changes discard unused preload Blobs and release the old source a
   await app.start(); await nextChapter(app);
   assert.equal(app.blobUrls.live.size, 2);
   const oldUrls = [...app.blobUrls.live];
-  app.select("Audiobook narrator").onChange({ target: { value: "other" } }); await app.settle();
-  assert.equal(app.audio.paused, true);
+  app.button("Other voice").onClick(); await app.settle();
+  assert.equal(app.audio.paused, false, "changing a prepared voice retains the playing state");
   assert.ok(oldUrls.every((url) => !app.blobUrls.live.has(url)));
   assert.ok(app.blobUrls.revoked.every((item) => item.unmounting || item.url !== item.currentSrc));
   app.cleanup(); assert.equal(app.blobUrls.live.size, 0);
@@ -479,4 +481,140 @@ test("persistent Listen stays disabled when the open chapter has no prepared aud
   assert.equal(app.audioCount(), 1);
   assert.equal(app.audio.paused, true);
   assert.equal(app.requests.some(({ url }) => url.includes("&chapter=1")), false);
+});
+
+function genderedSources(config = { source: wordManifest, textChapters: wordChapters }) {
+  const female = { ...config.source, narrator: { ...config.source.narrator, id: "kokoro-af_heart", name: "Heart", gender: "female" } };
+  const male = { ...config.source, generationId: "male-generation", narrator: { id: "kokoro-am_michael", name: "Michael", gender: "male", language: "en-US", engine: "kokoro", voice: "am_michael" }, chapters: config.source.chapters.map((chapter) => ({
+    ...chapter, audioPath: chapter.audioPath.replace("/heart/", "/michael/"), durationSeconds: chapter.durationSeconds * 0.7,
+    segments: chapter.segments.map((segment) => ({ ...segment, startSeconds: segment.startSeconds * 0.7, endSeconds: segment.endSeconds * 0.7 })),
+    words: chapter.words?.map((word) => ({ ...word, startSeconds: word.startSeconds * 0.7, endSeconds: word.endSeconds * 0.7 })),
+  })) };
+  return { ...config, source: female, narratorSources: [female, male] };
+}
+
+test("Female and Male voices keep the actual narrated word, playing state, speed and one media element", async (t) => {
+  const config = genderedSources();
+  const app = playerHarness(config); t.after(() => app.cleanup());
+  await app.start();
+  app.select("Audiobook playback speed").onChange({ target: { value: "1.5" } }); await app.settle();
+  const word = config.source.chapters[0].words[3];
+  const maleWord = config.narratorSources[1].chapters[0].words[3];
+  const element = app.audioProps().ref.current;
+  app.audio.currentTime = word.startSeconds + 0.3;
+  // There is no timeupdate event before switching. The media clock is authoritative.
+  app.button("Male voice").onClick(); await app.settle();
+  assert.equal(app.audio.currentTime, maleWord.startSeconds, "different recordings use their own word timestamps");
+  assert.equal(app.props.location.cfi, word.cfi);
+  assert.equal(app.props.location.charOffset, word.charStart);
+  assert.equal(app.props.mode, "listening");
+  assert.equal(app.audio.paused, false);
+  assert.equal(app.audio.playbackRate, 1.5);
+  assert.equal(app.button("Male voice")["aria-pressed"], true);
+  assert.equal(app.audioCount(), 1);
+  assert.equal(app.audioProps().ref.current, element);
+  const preference = JSON.parse(app.preferences.get("readlay-audio-preferences"));
+  assert.equal(preference.gender, "male");
+  assert.equal(preference.rate, 1.5);
+  app.button("Pause audiobook").onClick(); await app.settle();
+  app.button("Female voice").onClick(); await app.settle();
+  assert.equal(app.audio.currentTime, word.startSeconds);
+  assert.equal(app.audio.paused, true, "a paused recording stays paused after changing voice");
+  assert.equal(app.props.location.cfi, word.cfi);
+});
+
+test("changing voice in reading mode keeps its saved location and does not start playback", async (t) => {
+  const config = genderedSources();
+  const word = config.source.chapters[0].words[4];
+  const location = { chapterIndex: 0, paragraphIndex: 0, charOffset: word.charStart, cfi: word.cfi };
+  const app = playerHarness({ ...config, location }); t.after(() => app.cleanup());
+  await app.settle();
+  app.button("Male voice").onClick(); await app.settle();
+  assert.deepEqual(app.props.location, location);
+  assert.equal(app.positions.length, 0);
+  assert.equal(app.props.mode, "reading");
+  assert.equal(app.audio.paused, true);
+  await app.start();
+  assert.equal(app.audio.currentTime, config.narratorSources[1].chapters[0].words[4].startSeconds);
+});
+
+test("Read and Pause cancel automatic playback while a voice handover is pending", async (t) => {
+  for (const action of ["read", "pause"]) {
+    const app = playerHarness(genderedSources()); t.after(() => app.cleanup());
+    await app.start();
+    const word = wordManifest.chapters[0].words[2];
+    app.audio.currentTime = word.startSeconds + 0.2;
+    app.button("Male voice").onClick();
+    if (action === "read") app.read();
+    else app.button("Pause audiobook").onClick();
+    await app.settle();
+    assert.equal(app.audio.paused, true, action);
+    assert.equal(app.props.location.cfi, word.cfi, action);
+    assert.equal(app.props.mode, action === "read" ? "reading" : "listening", action);
+    assert.equal(app.button("Male voice")["aria-pressed"], true, action);
+  }
+});
+
+test("a voice without the current chapter or paragraph cannot be selected", async (t) => {
+  const chaptersConfig = genderedSources(twoChapterSource());
+  const male = chaptersConfig.narratorSources[1];
+  chaptersConfig.narratorSources[1] = { ...male, coverage: { ...male.coverage, complete: false, chapterIndices: [0] }, chapters: [male.chapters[0]] };
+  const absentChapter = playerHarness({ ...chaptersConfig, location: { chapterIndex: 1, paragraphIndex: 0 } }); t.after(() => absentChapter.cleanup());
+  await absentChapter.settle();
+  assert.equal(absentChapter.button("Male voice").disabled, true);
+  assert.equal(absentChapter.requests.some(({ url }) => url.includes("narrator=kokoro-am_michael&chapter=1")), false);
+
+  const paragraphConfig = genderedSources();
+  const source = paragraphConfig.narratorSources[1];
+  paragraphConfig.narratorSources[1] = { ...source, chapters: [{ ...source.chapters[0], segments: source.chapters[0].segments.slice(0, 1), words: source.chapters[0].words.filter((word) => word.paragraphIndex === 0) }] };
+  const absentParagraph = playerHarness({ ...paragraphConfig, location: { chapterIndex: 0, paragraphIndex: 1, charOffset: 0 } }); t.after(() => absentParagraph.cleanup());
+  await absentParagraph.settle();
+  assert.equal(absentParagraph.button("Male voice").disabled, true);
+  absentParagraph.button("Male voice").onClick(); await absentParagraph.settle();
+  assert.equal(absentParagraph.button("Female voice")["aria-pressed"], true);
+  assert.equal(absentParagraph.audio.paused, true);
+});
+
+test("the saved gender selects the equivalent narrator in another book", async (t) => {
+  const app = playerHarness({ ...genderedSources(), storedPreferences: { narratorId: "previous-books-male-narrator", gender: "male", rate: 1.75 } }); t.after(() => app.cleanup());
+  await app.settle();
+  assert.equal(app.button("Male voice")["aria-pressed"], true);
+  await app.start();
+  assert.equal(app.audio.playbackRate, 1.75);
+  assert.match(app.audioProps().src, /narrator=kokoro-am_michael/);
+});
+
+test("Pause remains effective after voice cues load while the replacement audio is buffering", async (t) => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const app = playerHarness({ ...genderedSources(), delayMedia: (src) => src.includes("narrator=kokoro-am_michael") ? gate : Promise.resolve() }); t.after(() => app.cleanup());
+  await app.start();
+  const word = wordManifest.chapters[0].words[3];
+  app.audio.currentTime = word.startSeconds + 0.2;
+  app.button("Male voice").onClick(); await app.settle();
+  assert.equal(app.audio.readyState, 0);
+  assert.equal(app.button("Male voice")["aria-pressed"], true);
+  app.button("Pause audiobook").onClick(); await app.settle();
+  release(); await app.settle();
+  assert.equal(app.audio.paused, true);
+  assert.equal(app.props.location.cfi, word.cfi);
+  assert.equal(app.button("Play audiobook").disabled, undefined);
+});
+
+test("Media Session pause and play wait for the replacement voice's pending word seek", async (t) => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const app = playerHarness({ ...genderedSources(), delayMedia: (src) => src.includes("narrator=kokoro-am_michael") ? gate : Promise.resolve() }); t.after(() => app.cleanup());
+  await app.start();
+  const word = wordManifest.chapters[0].words[4];
+  app.audio.currentTime = word.startSeconds + 0.2;
+  app.button("Male voice").onClick(); await app.settle();
+  app.mediaHandlers.get("pause")(); await app.settle();
+  assert.equal(app.audio.paused, true);
+  app.mediaHandlers.get("play")(); await app.settle();
+  assert.equal(app.audio.paused, true, "the replacement must not play before its source word can be sought");
+  release(); await app.settle();
+  assert.equal(app.audio.paused, false);
+  assert.equal(app.props.location.cfi, word.cfi);
+  assert.equal(app.audio.currentTime, genderedSources().narratorSources[1].chapters[0].words[4].startSeconds);
 });

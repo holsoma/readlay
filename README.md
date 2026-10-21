@@ -15,7 +15,9 @@ Read ebooks and switch to prepared audiobooks at your selected word.
 - Choose a narrator and a playback speed from 0.75× to 2×.
 - Prepare narration and word alignment locally with Kokoro and a free acoustic model. The website streams existing chapter Opus files without a speech API or GPU. Older paragraph MP3 recordings remain supported at their original precision.
 
-Built with Next.js, TypeScript, Auth.js, Neon PostgreSQL and private Supabase Storage. Audio preparation uses Python separately from the website.
+Built with Next.js, TypeScript, Auth.js, Neon PostgreSQL and private Supabase Storage, with optional private Cloudflare R2 support. Audio preparation uses Python separately from the website.
+
+Prepared recordings support Female (`af_heart`) and Male (`am_michael`) voice choices. Switching maps the current spoken word into the other recording, retaining playback speed and play/pause state. A voice is available only for chapters that have passed preparation and upload checks.
 
 ## Run locally
 
@@ -38,6 +40,8 @@ Keep the original EPUBs. They contain the structure and images used by `scripts/
 - [Setup and deployment](docs/SETUP.md)
 - [Architecture and word synchronisation](docs/ARCHITECTURE.md)
 - [Local Kokoro generation and audio upload](docs/AUDIO_PREPARATION.md)
+
+`scripts/generate_audiobook_catalogue.py` prepares both voices in a resumable local batch. Its unpublished staging folder stays separate from the website's active audio. Before deployment, run `python scripts/pack_audio_metadata.py` after verified uploads. The website packages losslessly compressed timing manifests, while recordings, models and Python environments remain outside Vercel.
 
 ## Checks
 

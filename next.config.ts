@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 import importedBooks from "./src/data/imported-books.json";
 
 const audiobookMetadata = Object.entries(importedBooks).flatMap(([bookId, book]) =>
-  ["manifest", "published"].map((name) => `.local/audiobooks/${bookId}/${book.editionId}/*/${name}.json`),
+  ["manifest.json.gz", "published.json"].map((name) => `.local/audiobooks/${bookId}/${book.editionId}/*/${name}`),
 );
 
 const nextConfig: NextConfig = {
@@ -20,6 +20,13 @@ const nextConfig: NextConfig = {
     "/*": [
       ".local/tooling/**/*",
       ".local/audio-venv/**/*",
+      ".local/audio-gpu-venv/**/*",
+      ".local/audio-batch/**/*",
+      ".local/audio-publish/**/*",
+      ".local/audio-context-check/**/*",
+      ".local/audiobook-batch-output/**/*",
+      ".local/audio-testtmp/**/*",
+      ".local/uv-cache/**/*",
       ".local/audio-cache/**/*",
       ".local/audio-models/**/*",
       ".local/verification-runtime/**/*",
@@ -29,6 +36,7 @@ const nextConfig: NextConfig = {
       ".local/**/*.epub",
       ".local/**/*.wav",
       ".local/audiobooks/**/preparation.json",
+      ".local/audiobooks/**/manifest.json",
       ".local/audiobooks/**/upload-receipt.json",
       ".local/audiobooks/**/.upload-state.json",
       ".local/audiobooks/**/.cache/**/*",

@@ -94,9 +94,75 @@ class WordPipelineTests(unittest.TestCase):
             self.assertTrue(spoken_sentence(text)[0].startswith("minus five"))
         for text in ("-$3.50", "$-3.50", "−£3.50"):
             self.assertTrue(spoken_sentence(text)[0].startswith("minus three"))
-        for text in ("1/2 cup.", "½ cup.", "x^2 = 4.", ".5%", "20–30 days"):
+        for text in ("conflicting^ signals", "x∫2", "0.99365 = 00.03", "1.01365 = 37.78"):
             with self.assertRaises(PreparationError):
                 spoken_sentence(text)
+
+    def test_spoken_ranges_fractions_and_operators_retain_every_exact_source_word(self):
+        examples = {
+            "😀 Use 1/2 cup and ½ cup, or 1½ cups.": ("one over two", "one half", "one and one half"),
+            "Wait 20–30 days, then check 1985—1986.": ("twenty to thirty", "one thousand nine hundred and eighty five to one thousand nine hundred and eighty six"),
+            "x^2 = 4; 6 × 2 > 10; 8 ÷ 2 < 5; √9 ± 1.": ("x to the power of two", "equals four", "six  times  two  greater than  ten", "square root of nine"),
+            ".05% and -.5 degrees.": ("zero point zero five", "minus zero point five"),
+            "Pay $.50 or -£.25.": ("zero dollars fifty cents", "minus zero pounds sterling twenty five pence"),
+            "The 20/20/20 Formula.": ("twenty slash twenty slash twenty",),
+            "Wake up > Make my bed > Take a shower.": ("Wake up then Make my bed then Take a shower",),
+            "PRESSURE × REFUELING = GROWTH + ENDURANCE.": ("PRESSURE times REFUELING equals GROWTH plus ENDURANCE",),
+            "X > Y.": ("X greater than Y",),
+            "0.99^365 = 00.03 and 1.01^365 = 37.78.": ("zero point nine nine to the power of three hundred and sixty five", "equals zero point zero three", "one point zero one to the power of three hundred and sixty five"),
+        }
+        for text, expected_parts in examples.items():
+            with self.subTest(text=text):
+                spoken, mapped = spoken_sentence(text)
+                for part in expected_parts:
+                    self.assertIn(" ".join(part.split()), " ".join(spoken.split()))
+                self.assertEqual([{key: word[key] for key in ("text", "start", "end", "charStart", "charEnd")} for word in mapped], source_words(text))
+                for word in mapped:
+                    self.assertTrue(spoken[word["spokenStart"]:word["spokenEnd"]].strip())
+                    self.assertEqual(text[word["start"]:word["end"]], word["text"])
+        for text in ("1/0 cup", "2²", "1.01365=37.78", "wrong^ spelling", "a^d"):
+            with self.subTest(rejected=text), self.assertRaises(PreparationError):
+                spoken_sentence(text)
+
+    def test_known_written_labels_and_case_insensitive_decades_are_not_guessed_ocr(self):
+        from audio.word_alignment import spoken_word
+        expected = {"1940S": "nineteen forties", "1990S": "nineteen nineties", "60’s": "sixties", "600s": "six hundreds",
+                    "F1": "F one", "Q1": "Q one", "Q4": "Q four", "5K": "five K", "5AC": "five A C",
+                    "2WW": "two W W", "2MP": "two M P", "2x3x": "two times three times", "10x": "ten times",
+                    "x100": "times one hundred", "18ff": "eighteen F F", "142n": "one hundred and forty two N", "A380": "A three eight zero",
+                    "NY2011": "N Y two zero one one", "eaao5961": "E A A O five nine six one"}
+        for text, result in expected.items():
+            with self.subTest(text=text):
+                self.assertEqual(spoken_word(text), result)
+        for text in ("i982", "8o", "60o", "1oo", "0fevery", "A12B", "Q5", "PANCHA1"):
+            with self.subTest(rejected=text), self.assertRaises(PreparationError):
+                spoken_word(text)
+
+    def test_url_and_doi_identifiers_speak_digits_with_exact_original_ranges(self):
+        text = "😀 See https://example.com/a12-b3?q=9 and doi:10.1093/sleep/29.11.1398."
+        spoken, mapped = spoken_sentence(text)
+        self.assertIn("H T T P S", spoken)
+        self.assertIn("A one two dash B three", spoken)
+        self.assertIn("question mark", spoken)
+        self.assertIn("two nine dot one one dot one three nine eight", spoken)
+        self.assertEqual([{key: word[key] for key in ("text", "start", "end", "charStart", "charEnd")} for word in mapped], source_words(text))
+        self.assertEqual(mapped[0]["charStart"], 3)
+        encoded = text.encode("utf-16-le")
+        for word in mapped:
+            self.assertEqual(encoded[word["charStart"] * 2:word["charEnd"] * 2].decode("utf-16-le"), word["text"])
+            self.assertTrue(spoken[word["spokenStart"]:word["spokenEnd"]].strip())
+        with self.assertRaises(PreparationError):
+            spoken_sentence("An unlabelled numeric value 3.1.4 needs review.")
+        broken_identifiers = "See @mmay3r, disciplined/comments/6fgqbv, and doi:10.1016/j.cel rep.2014.08.037."
+        spoken, mapped = spoken_sentence(broken_identifiers)
+        self.assertIn("M M A Y three R", spoken)
+        self.assertIn("six F G Q B V", spoken)
+        self.assertIn("two zero one four dot zero eight dot zero three seven", spoken)
+        self.assertEqual([word["text"] for word in mapped], [word["text"] for word in source_words(broken_identifiers)])
+        slug = "https://example.com/21722163-experimental-iterative-data-driven-approach"
+        spoken, mapped = spoken_sentence(slug)
+        self.assertIn("two one seven two two one six three dash experimental dash iterative dash data dash driven dash approach", spoken)
+        self.assertEqual([word["text"] for word in mapped], [word["text"] for word in source_words(slug)])
 
     def test_silence_and_uniform_acoustic_emissions_fail_closed(self):
         try:

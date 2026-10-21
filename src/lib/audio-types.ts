@@ -1,7 +1,17 @@
 import { parseEpubCfi } from "./epub-location";
 
-export type AudioNarratorSummary = { id: string; name: string; language: string };
+export type AudioVoiceGender = "female" | "male";
+export type AudioNarratorSummary = { id: string; name: string; language: string; gender?: AudioVoiceGender; chapterIndices?: number[] };
 export type AudioNarrator = AudioNarratorSummary & { engine: string; voice: string };
+
+/** Older Kokoro manifests predate the optional, explicit voice description. */
+export function narratorGender(narrator: AudioNarratorSummary & { voice?: string }): AudioVoiceGender | undefined {
+  if (narrator.gender) return narrator.gender;
+  const voice = narrator.voice ?? narrator.id.replace(/^kokoro-/, "");
+  if (/^[ab]f_/.test(voice)) return "female";
+  if (/^[ab]m_/.test(voice)) return "male";
+  return undefined;
+}
 export type AudioSegment = { paragraphIndex: number; startSeconds: number; endSeconds: number; textHash: string };
 export type AudioWord = { paragraphIndex: number; charStart: number; charEnd: number; startSeconds: number; endSeconds: number; cfi: string };
 export type AudioChapterSummary = {
@@ -26,12 +36,14 @@ const seconds = (value: unknown): value is number => typeof value === "number" &
 const identifier = (value: unknown): value is string => typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(value);
 
 function narratorSummary(value: unknown): value is AudioNarratorSummary {
-  return record(value) && identifier(value.id) && text(value.name, 120) && text(value.language, 35);
+  return record(value) && identifier(value.id) && text(value.name, 120) && text(value.language, 35) &&
+    (value.gender === undefined || value.gender === "female" || value.gender === "male") &&
+    (value.chapterIndices === undefined || (Array.isArray(value.chapterIndices) && value.chapterIndices.length <= 10000 && value.chapterIndices.every((chapter, offset, items) => index(chapter) && (offset === 0 || chapter > items[offset - 1]))));
 }
 export function parseAudioNarrators(value: unknown): AudioNarratorSummary[] | null {
   if (!record(value) || !Array.isArray(value.narrators) || value.narrators.length > 100 || !value.narrators.every(narratorSummary)) return null;
   if (new Set(value.narrators.map((item) => item.id)).size !== value.narrators.length) return null;
-  return value.narrators.map(({ id, name, language }) => ({ id, name, language }));
+  return value.narrators.map(({ id, name, language, gender, chapterIndices }) => ({ id, name, language, ...(gender ? { gender } : {}), ...(chapterIndices ? { chapterIndices } : {}) }));
 }
 function validHeader(value: unknown): value is Record<string, unknown> & AudioManifestIndex {
   if (!record(value) || value.sampleRate !== 24000) return false;
