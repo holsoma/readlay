@@ -25,6 +25,10 @@ scripts/__pycache__
 .local/verification-runtime
 .local/dictionary-qa
 .local/word-qa
+.local/pdf-review
+.local/pdf-import
+.local/pdf-import-review
+.local/editions
 .local/*.mjs
 .local/*.py
 .local/*.log

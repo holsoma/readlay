@@ -40,7 +40,7 @@ python scripts/import_books.py --source-dir "C:\path\to\epubs"
 
 The importer writes private text to `.local/books` and aggregate statistics to `src/data/imported-books.json`. Edition identifiers change when the input or cleanup rules change. Audio and saved locations from another edition are rejected. Printed contents, copyright pages, advertisements, repeated running headings and empty sections are removed. Substantive introductions, notes and book content are preserved.
 
-Keep EPUB as the source format for the mobile reader. Its structured text and embedded images can be rendered without preserving a fixed page size. PDF is useful for a page facsimile, but extracting it does not automatically preserve reading order or create reliable text locations. Readlay does not currently provide a PDF page renderer.
+EPUB remains the preferred general source because it contains structured text and embedded images. The reviewed Seven Habits PDF also has a dedicated local importer. It produces responsive text and inline diagrams, rather than a fixed page viewer. Arbitrary PDFs still require review of their reading order, chapter boundaries and figures.
 
 After import, prepare the reader presentation with Python 3.10 or later and Pillow:
 
@@ -53,7 +53,20 @@ The command compares source paragraphs and editions with the existing canonical 
 
 Reviewed spelling and spacing repairs live in `src/data/reader-corrections.json`, scoped to an edition. The prepared display retains original UTF-16 ranges, paragraph order and edition identifiers, so existing positions and audio remain valid. A split display token can contain several readable words with one original source range. It does not gain independent audio timestamps without regeneration and alignment. Manual dictionary correction remains available for unrepaired source errors. Do not apply broad replacements to valid words, names or uncertain passages.
 
-Reading estimates assume 250 words per minute. The supplied **The 7 Habits of Highly Effective People** file ends during Habit 4 and is labelled incomplete. Habits 5 to 7 cannot be recovered by cleaning that file.
+Reading estimates assume 250 words per minute. The original Seven Habits EPUB ended during Habit 4. The active replacement is the reviewed complete 282-page PDF, with 22 reading sections and 54 diagrams. The old source remains privately archived. The EPUB importer keeps an active PDF edition unless it is replaced through a separately reviewed edition transition. Use `--book <id>` to prepare an individual EPUB; do not run EPUB presentation preparation against the PDF replacement.
+
+### Prepare the complete Seven Habits PDF
+
+```powershell
+python -m pip install -r requirements-pdf-import.txt
+python scripts/import_pdf_book.py --source "C:\path\to\complete-seven-habits.pdf"
+```
+
+This command stages the reviewed edition under `.local/pdf-import/seven-habits`. Its profile checks the page count and contents before importing text, figures and source-page provenance. It retains the dedication, acknowledgements, forewords, all seven habits, appendices, final interview and endnotes. Decorative separators and seven superscript reference markers are excluded from spoken prose; their provenance and the full endnotes remain available. Check the private contact sheets, text coverage and figure anchors before promotion.
+
+Back up the old canonical book and presentation first. Generate an offset-only transition using `scripts/map_book_editions.py --old-book <old-book.json> --new-book <staged-book.json> --book-id seven-habits --output <staged-map.json> --report <private-report.json>`. Only verified word matches and passage anchors enter the map. Review unmapped material, including content that differs between editions.
+
+Promote the reviewed canonical JSON, reader presentation, validated figure files, aggregate catalogue statistics and matching `.local/edition-migrations/seven-habits.json` together. Never attach old audio manifests to the new text. Migration 004 adds per-account transition markers; the first library request copies mapped progress and bookmarks atomically without changing old rows or replacing an existing new-edition position. Word Bank links and highlights use mapped exact word ranges while definitions and original contexts remain stored. Browser caches are backed up by account before conversion. Unmatched old records remain retained rather than receiving invented positions.
 
 The catalogue contains Atomic Habits, The 7 Habits of Highly Effective People, How to Win Friends and Influence People, The 48 Laws of Power, The Power of Your Subconscious Mind, Rich Dad Poor Dad, The 5 AM Club and The Power of Now. Four topics organise these books. The original sample has been removed.
 
@@ -95,7 +108,7 @@ The prepared reader uses reviewed display repairs for known source errors, with 
 4. Run `npx vercel --prod` from this prepared directory. The build runs the migration using credentials already held in Vercel, then builds Next.js. A production database credential download is unnecessary.
 5. Verify GitHub sign-in, a bookmark, progress from another browser and an uploaded audio chapter before describing the deployment as fully connected.
 
-Private book JSON, reader presentation manifests, validated book illustrations and audio manifests are included in the CLI deployment as server files. Illustrations are served through an authenticated endpoint, with private browser caching. Opus files, MP3s, WAVs, canonical EPUBs, model weights, caches and Python environments are excluded. Audio streams from Supabase. Books, illustrations and generated audio stay out of Git, so a Git-only deployment requires a separate private content delivery step. Never move them into `public`.
+Private book JSON, reader presentation manifests, validated book illustrations, numeric edition-transition metadata and audio manifests are included in the CLI deployment as server files. Illustrations are served through an authenticated endpoint, with private browser caching. PDF staging, source archives, review reports, Opus files, MP3s, WAVs, canonical EPUBs, model weights, caches and Python environments are excluded. Audio streams from the provider recorded in each verified publication receipt. Books, illustrations and generated audio stay out of Git, so a Git-only deployment requires a separate private content delivery step. Never move them into `public`.
 
 ## Checks
 

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { emptyLibrary, loadTypeScript, plain, testBooks } from "./helpers/load-typescript.mjs";
 
-function syncHarness() {
+function syncHarness({ catalogue = testBooks, migration } = {}) {
   const storage = new Map();
   const localStorage = {
     getItem: (key) => storage.get(key) ?? null,
@@ -76,6 +76,7 @@ function syncHarness() {
     if (offline) throw new TypeError("Offline");
     if (options.signal.aborted) throw new DOMException("Aborted", "AbortError");
     const address = new URL(url, "https://readlay.test");
+    if (address.pathname === "/api/edition-migrations") return migration ? Response.json(migration) : Response.json({}, { status: 404 });
     const body = options.method === "POST" ? JSON.parse(options.body) : null;
     const expected = body?.expectedUserId ?? address.searchParams.get("expectedUserId");
     if (expected !== sessionUser) return Response.json({}, { status: 401 });
@@ -109,7 +110,7 @@ function syncHarness() {
       "react/jsx-runtime": { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) },
       "next-auth/react": {},
       "next/navigation": { useRouter: () => ({ push() {} }) },
-      "@/data/books": { books: testBooks },
+      "@/data/books": { books: catalogue },
       "@/lib/epub-location": loadTypeScript("src/lib/epub-location.ts"),
     },
     globals: { window, document, navigator, localStorage, fetch },
@@ -268,4 +269,63 @@ test("legacy progress normalises to offset 0 and malformed cached positions are 
   // Existing callers that only pass chapter and paragraph retain the old behaviour.
   guest.render().saveProgress(0, 1, "atomic-habits", "edition-a"); await settle();
   assert.equal(guest.render().getProgress("atomic-habits", "edition-a").charOffset, 0);
+});
+
+const retiredEdition = "b17d5f5bc348f3d6", replacementEdition = "1234567890abcdef";
+const migrationFixture = { schemaVersion: 1, bookId: "seven-habits", fromEditionId: retiredEdition, toEditionId: replacementEdition,
+  paragraphs: { "0:0": { sourceLength: 30, target: { chapterIndex: 1, paragraphIndex: 2, charOffset: 2 }, words: [[10, 15, 1, 2, 5, 10]] } } };
+const migratedBooks = [...testBooks, { id: "seven-habits", editionId: replacementEdition, chapterCount: 4 }];
+function retiredCache() {
+  return { base: { ...emptyLibrary(), progressByEdition: { [`seven-habits:${retiredEdition}`]: { chapterIndex: 0, paragraphIndex: 0, charOffset: 10 } },
+    bookmarks: [{ id: `seven-habits:${retiredEdition}:0:0`, bookId: "seven-habits", editionId: retiredEdition, chapterIndex: 0, paragraphIndex: 0, text: "Original context", chapterTitle: "Original heading" }], lastReadBookId: "seven-habits" }, pending: [] };
+}
+
+test("a guest cache restores the updated edition before parsing and keeps an account-scoped original archive", async (t) => {
+  const app = syncHarness({ catalogue: migratedBooks, migration: migrationFixture }); t.after(() => app.cleanup());
+  const original = JSON.stringify(retiredCache());
+  app.storage.set("readlay-v4:guest", original);
+  const accountOriginal = JSON.stringify({ base: { ...emptyLibrary(), savedIds: ["atomic-habits"] }, pending: [] });
+  app.storage.set("readlay-v4:github:A", accountOriginal);
+  let guest = app.mount(null); await settle();
+  assert.equal(guest.render().ready, true);
+  assert.equal(guest.render().getProgress("seven-habits", replacementEdition).charOffset, 5);
+  assert.equal(guest.render().bookmarks[0].chapterIndex, 1);
+  assert.equal(guest.render().bookmarks[0].paragraphIndex, 2);
+  const archiveKey = `readlay-v4:guest:edition-backup:seven-habits:${retiredEdition}:${replacementEdition}`;
+  assert.equal(app.storage.get(archiveKey), original);
+  assert.equal(app.storage.get("readlay-v4:github:A"), accountOriginal);
+  guest.render().toggleBookmark(1, 2, "Original context", "seven-habits", replacementEdition); await settle();
+  assert.equal(guest.render().bookmarks.length, 0);
+  guest.unmount(); guest = app.mount(null); await settle();
+  assert.equal(guest.render().bookmarks.length, 0, "the archived original must not resurrect a removed bookmark");
+  assert.equal(app.storage.get(archiveKey), original);
+  assert.equal(app.sends.length, 0, "guest data must remain local");
+});
+
+test("a migration request failure preserves the untouched cache and a guest can retry on reconnection", async (t) => {
+  const app = syncHarness({ catalogue: migratedBooks, migration: migrationFixture }); t.after(() => app.cleanup());
+  const original = JSON.stringify(retiredCache()); app.storage.set("readlay-v4:guest", original);
+  app.setOffline(true);
+  const guest = app.mount(null); await settle();
+  assert.equal(app.storage.get("readlay-v4:guest"), original);
+  assert.equal(guest.render().syncStatus, "error");
+  guest.render().saveProgress(1, 2, "seven-habits", replacementEdition, 9); await settle();
+  assert.equal(app.storage.get("readlay-v4:guest"), original, "failed migration must not discard the old location through a later save");
+  app.reconnect(); await settle();
+  assert.equal(guest.render().getProgress("seven-habits", replacementEdition).charOffset, 5);
+});
+
+test("an account's unsent retired bookmark removal is remapped and never sent with stale coordinates", async (t) => {
+  const app = syncHarness({ catalogue: migratedBooks, migration: migrationFixture }); t.after(() => app.cleanup());
+  const cache = retiredCache();
+  cache.pending.push({ id: "retired-removal", action: { type: "bookmark", bookId: "seven-habits", editionId: retiredEdition, chapterIndex: 0, paragraphIndex: 0, saved: false } });
+  app.storage.set("readlay-v4:github:A", JSON.stringify(cache));
+  app.remotes.set("A", { ...emptyLibrary(), bookmarks: [{ id: `seven-habits:${replacementEdition}:1:2`, bookId: "seven-habits", editionId: replacementEdition, chapterIndex: 1, paragraphIndex: 2, text: "Authoritative replacement text", chapterTitle: "New heading" }] });
+  const tab = app.mount(); await settle();
+  assert.equal(tab.render().syncStatus, "synced");
+  assert.equal(tab.render().bookmarks.length, 0);
+  assert.equal(app.sends.length, 1);
+  assert.equal(app.sends[0].editionId, replacementEdition);
+  assert.equal(app.sends[0].chapterIndex, 1);
+  assert.equal(app.sends[0].paragraphIndex, 2);
 });

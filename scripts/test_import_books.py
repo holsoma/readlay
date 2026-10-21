@@ -5,8 +5,12 @@ Run from the project directory with:
 """
 
 import json
+import contextlib
+import io
 from pathlib import Path
+import tempfile
 import unittest
+from unittest import mock
 
 from scripts import import_books as importer
 
@@ -119,7 +123,11 @@ class CurrentCorpusChecks(unittest.TestCase):
                 self.assertEqual(counts, {"sections": expected["chapterCount"], "paragraphs": expected["paragraphCount"], "words": expected["wordCount"]})
                 self.assertEqual(counts, report["books"][book_id]["after"])
                 self.assertFalse(any(a == b for a, b in zip(paragraphs, paragraphs[1:])))
-                for chapter in content["chapters"]:
+                presentation = None
+                if expected.get("sourceFormat") == "PDF":
+                    presentation = json.loads((root / ".local/reader" / f"{book_id}.json").read_text(encoding="utf-8"))
+                    self.assertEqual(presentation["editionId"],content["editionId"])
+                for chapter_index, chapter in enumerate(content["chapters"]):
                     self.assertTrue(chapter["title"].strip())
                     self.assertTrue(chapter["paragraphs"])
                     self.assertTrue(all(isinstance(p, str) and p.strip() for p in chapter["paragraphs"]))
@@ -127,7 +135,83 @@ class CurrentCorpusChecks(unittest.TestCase):
                     self.assertNotIn("...", chapter["title"])
                     opening = importer.label_key(chapter["paragraphs"][0])
                     title = importer.label_key(chapter["title"])
-                    self.assertFalse(len(opening) > 8 and title.endswith(opening))
+                    duplicate_heading = len(opening) > 8 and title.endswith(opening)
+                    if presentation is not None and duplicate_heading:
+                        self.assertIs(presentation["chapters"][chapter_index]["paragraphs"].get("0",{}).get("hidden"),True)
+                    else:
+                        self.assertFalse(duplicate_heading)
+
+
+class ImportSelectionTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.stats_path = self.root / "src/data/imported-books.json"
+        self.report_path = self.root / ".local/cleanup-report.json"
+        self.book_path = self.root / ".local/books/seven-habits.json"
+        self.pdf_stats = {"editionId":"complete-pdf", "sourceFormat":"PDF", "isComplete":True, "wordCount":117671}
+        importer.write_json(self.stats_path,{"seven-habits":self.pdf_stats,"atomic-habits":{"editionId":"atomic-habits-v1","reviewedMetadata":"retained"},"future-book":{"editionId":"future-edition","custom":"keep"}})
+        importer.write_json(self.report_path,{"parserVersion":"earlier-parser","reviewed":True,"books":{"seven-habits":{"after":{"words":117671}},"future-book":{"custom":"keep"}}})
+        importer.write_json(self.book_path,{"editionId":"complete-pdf","chapters":[{"title":"Original PDF chapter","paragraphs":["An original test paragraph."]}]})
+        self.before = {path:path.read_bytes() for path in (self.stats_path,self.report_path,self.book_path)}
+
+    def run_import(self,arguments,side_effect=None):
+        imported = mock.Mock(side_effect=side_effect or (lambda source,book_id,title:({"editionId":f"{book_id}-v1","chapters":[{"title":"A test chapter","paragraphs":["Original fixture prose."]}]},{"editionId":f"{book_id}-v1","wordCount":3},{"after":{"words":3}})))
+        with mock.patch.object(importer,"PROJECT_ROOT",self.root), mock.patch.object(importer,"resolve_source",side_effect=lambda directory,book_id,filename:directory/filename) as resolve, mock.patch.object(importer,"import_book",imported), mock.patch("sys.argv",["import_books.py","--source-dir",str(self.root),*arguments]), contextlib.redirect_stdout(io.StringIO()) as output:
+            importer.main()
+        return imported,resolve,output.getvalue()
+
+    def test_default_import_keeps_active_pdf_and_unselected_metadata(self):
+        imported,resolve,output = self.run_import([])
+        self.assertEqual(imported.call_count,len(importer.BOOKS)-1)
+        self.assertNotIn("seven-habits",[call.args[1] for call in resolve.call_args_list])
+        self.assertEqual(self.book_path.read_bytes(),self.before[self.book_path])
+        stats = json.loads(self.stats_path.read_text())
+        report = json.loads(self.report_path.read_text())
+        self.assertEqual(stats["seven-habits"],self.pdf_stats)
+        self.assertEqual(stats["future-book"]["custom"],"keep")
+        self.assertEqual(report["books"]["seven-habits"],{"after":{"words":117671}})
+        self.assertEqual(report["books"]["future-book"],{"custom":"keep"})
+        self.assertTrue(report["reviewed"])
+        self.assertIn("Kept PDF edition complete-pdf for seven-habits.",output)
+
+    def test_explicit_pdf_selection_refuses_before_imports_or_writes(self):
+        with mock.patch.object(importer,"PROJECT_ROOT",self.root), mock.patch.object(importer,"import_book") as imported, mock.patch.object(importer,"resolve_source") as resolve, mock.patch("sys.argv",["import_books.py","--source-dir",str(self.root),"--book","atomic-habits","--book","seven-habits"]), contextlib.redirect_stderr(io.StringIO()) as errors:
+            with self.assertRaises(SystemExit):
+                importer.main()
+        imported.assert_not_called()
+        resolve.assert_not_called()
+        self.assertIn("staged edition workflow",errors.getvalue())
+        for path,data in self.before.items():
+            self.assertEqual(path.read_bytes(),data)
+
+    def test_repeatable_selection_deduplicates_and_preserves_same_edition_metadata(self):
+        imported,_,_ = self.run_import(["--book","atomic-habits","--book","win-friends","--book","atomic-habits"])
+        self.assertEqual(imported.call_count,2)
+        stats = json.loads(self.stats_path.read_text())
+        self.assertEqual(stats["atomic-habits"]["reviewedMetadata"],"retained")
+        self.assertEqual(stats["atomic-habits"]["wordCount"],3)
+        self.assertEqual(stats["seven-habits"],self.pdf_stats)
+        self.assertEqual(self.book_path.read_bytes(),self.before[self.book_path])
+
+    def test_import_failure_does_not_write_prepared_partial_results(self):
+        def fail_later(source,book_id,title):
+            if book_id == "win-friends":
+                raise importer.ImportFailure("A fixture failed")
+            return {"editionId":"new"},{"editionId":"new"},{"after":{}}
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            self.run_import(["--book","atomic-habits","--book","win-friends"],fail_later)
+        for path,data in self.before.items():
+            self.assertEqual(path.read_bytes(),data)
+        self.assertFalse((self.root/".local/books/atomic-habits.json").exists())
+
+    def test_changed_edition_does_not_inherit_stale_edition_metadata(self):
+        def replacement(source,book_id,title):
+            return {"editionId":"atomic-v2"},{"editionId":"atomic-v2","wordCount":4},{"after":{"words":4}}
+        self.run_import(["--book","atomic-habits"],replacement)
+        stats = json.loads(self.stats_path.read_text())
+        self.assertEqual(stats["atomic-habits"],{"editionId":"atomic-v2","wordCount":4})
 
 
 if __name__ == "__main__":

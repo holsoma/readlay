@@ -15,11 +15,12 @@ const action = { ...input, action: "save", expectedUserId: "A" };
 const locations = loadTypeScript("src/lib/epub-location.ts");
 const errorIs = (status) => (error) => error.status === status;
 
-function harness() {
+function harness({ migrations = [], bookContent } = {}) {
   const queries = [];
   let rows = [[], []];
   let lookupWord = "habit";
   let lookupError;
+  const contentRequests = [];
   const sql = (parts, ...values) => {
     queries.push({ text: parts.join("?"), values });
     return Promise.resolve([]);
@@ -29,17 +30,18 @@ function harness() {
   const store = loadTypeScript("src/lib/wordbank-store.ts", {
     stubs: {
       "server-only": {}, "@neondatabase/serverless": { neon: () => sql },
+      "@/lib/edition-migration-store": { getEditionMigrations: async () => migrations },
       "@/data/books": { books: testBooks },
-      "@/lib/book-content": { getBookContent: async () => ({ editionId: "edition-a", chapters: [
+      "@/lib/book-content": { getBookContent: async (bookId) => { contentRequests.push(bookId); return bookContent ?? ({ editionId: "edition-a", chapters: [
         { paragraphs: ["A habit grows. Another habit stays.", "😀 We build habits.", "A subdecongenial word appears."] },
-      ] }) },
+      ] }); } },
       "@/lib/dictionary": { DictionaryError, getDictionaryLookup: async () => {
         if (lookupError) throw lookupError;
         return { query: "habits", entry: { ...entry, word: lookupWord } };
       } },
     }, env: { DATABASE_URL: "test-only-connection" },
   });
-  return { store, queries, DictionaryError, setRows(value) { rows = value; }, setLookupWord(value) { lookupWord = value; }, setLookupError(value) { lookupError = value; } };
+  return { store, queries, contentRequests, DictionaryError, setRows(value) { rows = value; }, setLookupWord(value) { lookupWord = value; }, setLookupError(value) { lookupError = value; } };
 }
 
 test("Word Bank rejects invalid actions, stale editions, fractional offsets and arbitrary IDs", () => {
@@ -175,6 +177,71 @@ test("Word Bank reads all occurrences and scopes every read/write to the authent
   }
   const types = loadTypeScript("src/lib/wordbank-types.ts");
   assert.equal(types.parseWordBank({ words: [{ ...plain(words[0]), occurrences: [{ ...plain(words[0].occurrences[0]), cfiRange: "epubcfi(/6/2!)" }] }] }), null);
+});
+
+test("Word Bank projects exact retired-edition occurrences without rewriting saved definitions, context or unmatched source links", async () => {
+  const from = "b17d5f5bc348f3d6", to = "1234567890abcdef";
+  const migration = { schemaVersion: 1, bookId: "seven-habits", fromEditionId: from, toEditionId: to, paragraphs: {
+    "0:0": { sourceLength: 32, target: { chapterIndex: 2, paragraphIndex: 4, charOffset: 10 }, words: [[2, 7, 2, 4, 10, 15]] },
+  } };
+  const app = harness({ migrations: [migration], bookContent: { editionId: to, chapters: [{ paragraphs: [] }, { paragraphs: [] }, { paragraphs: ["", "", "", "", "An active habit grows."] }] } });
+  const occurrence = { id: occurrenceId, word_id: wordId, book_id: "seven-habits", edition_id: from, chapter_index: 0, paragraph_index: 0,
+    char_start: 2, char_end: 7, cfi_start: locations.cfiForPosition(0, 0, 2), cfi_end: locations.cfiForPosition(0, 0, 7),
+    cfi_range: locations.cfiForRange(0, 0, 2, 7), sentence: "A habit from the original edition.", selected_text: "habit", saved_at: date };
+  const unmatched = { ...occurrence, id: "bbf181d8-9f2d-4c29-a63e-202510220003", char_start: 20, char_end: 25,
+    cfi_start: locations.cfiForPosition(0, 0, 20), cfi_end: locations.cfiForPosition(0, 0, 25), cfi_range: locations.cfiForRange(0, 0, 20, 25) };
+  const rows = [[{ id: wordId, word: "habit", entry, status: "learning", saved_at: date, updated_at: date }], [occurrence, unmatched]];
+  const before = JSON.stringify(rows); app.setRows(rows);
+  const words = await app.store.getWordBank("A");
+  assert.equal(words[0].status, "learning"); assert.equal(words[0].entry.meanings[0].definitions[0].definition, entry.meanings[0].definitions[0].definition);
+  assert.equal(words[0].occurrences[0].editionId, to);
+  assert.equal(words[0].occurrences[0].cfiRange, locations.cfiForRange(2, 4, 10, 15));
+  assert.equal(words[0].occurrences[0].sentence, occurrence.sentence);
+  assert.equal(words[0].occurrences[0].id, occurrenceId);
+  assert.equal(words[0].occurrences[1].editionId, from, "unmatched vocabulary must keep its original edition rather than invent a link");
+  assert.equal(JSON.stringify(rows), before, "the stored snapshots must be untouched");
+  assert.equal(app.queries.every((query) => /^SELECT/.test(query.text)), true, "projection must not write or duplicate stored occurrences");
+  const views = loadTypeScript("src/lib/wordbank-view.ts");
+  assert.equal(views.wordOccurrenceHref(words[0].occurrences[0], { slug: "seven-habits", editionId: to }), "/read/seven-habits?chapter=2&paragraph=4&offset=10");
+  assert.equal(views.wordOccurrenceHref(words[0].occurrences[1], { slug: "seven-habits", editionId: to }), null);
+});
+
+test("projected vocabulary highlights use exact new case and apostrophes while retaining original saved contexts", async () => {
+  const from = "b17d5f5bc348f3d6", to = "1234567890abcdef";
+  const targetText = "Band-Aids don’t";
+  const migration = { schemaVersion: 1, bookId: "seven-habits", fromEditionId: from, toEditionId: to, paragraphs: {
+    "0:0": { sourceLength: 15, target: { chapterIndex: 0, paragraphIndex: 0, charOffset: 0 }, words: [[0, 9, 0, 0, 0, 9], [10, 15, 0, 0, 10, 15]] },
+  } };
+  const app = harness({ migrations: [migration], bookContent: { editionId: to, chapters: [{ paragraphs: [targetText] }] } });
+  const heads = ["band-aids", "don't"], ids = [wordId, "bbf181d8-9f2d-4c29-a63e-202510220009"];
+  const rows = [heads.map((head, index) => ({ id: ids[index], word: head, entry: { ...entry, word: head }, status: "learning", saved_at: date, updated_at: date })),
+    heads.map((head, index) => {
+      const start = index ? 10 : 0, end = index ? 15 : 9;
+      return { id: `${occurrenceId}-${index}`, word_id: ids[index], book_id: "seven-habits", edition_id: from, chapter_index: 0, paragraph_index: 0,
+        char_start: start, char_end: end, cfi_start: locations.cfiForPosition(0, 0, start), cfi_end: locations.cfiForPosition(0, 0, end),
+        cfi_range: locations.cfiForRange(0, 0, start, end), sentence: "Original band-aids don't context.", selected_text: head, saved_at: date };
+    })];
+  const stored = JSON.stringify(rows); app.setRows(rows);
+  const projected = await app.store.getWordBank("A");
+  assert.deepEqual(plain(projected.map((word) => word.occurrences[0].selectedText)), ["Band-Aids", "don’t"]);
+  for (const [index, word] of projected.entries()) {
+    const occurrence = word.occurrences[0];
+    assert.equal(targetText.slice(occurrence.charStart, occurrence.charEnd), occurrence.selectedText, "Reader's exact saved-highlight check must pass");
+    assert.equal(occurrence.sentence, rows[1][index].sentence);
+    assert.equal(occurrence.id, rows[1][index].id);
+    assert.equal(word.status, "learning");
+    assert.equal(word.entry.word, heads[index]);
+    assert.deepEqual(plain(word.entry.meanings), entry.meanings, "the saved definitions must be unchanged");
+    assert.equal(word.entry.phonetic, entry.phonetic);
+    assert.equal(word.entry.audioUrl, entry.audioUrl);
+  }
+  assert.equal(JSON.stringify(rows), stored, "original selected spellings and all stored records must be unchanged");
+  assert.deepEqual(app.contentRequests, ["seven-habits"], "fetch the current book once even when two headwords need projection");
+  assert.equal(app.queries.every((query) => /^SELECT/.test(query.text)), true);
+  app.contentRequests.length = 0;
+  app.setRows([rows[0], rows[1].map((row) => ({ ...row, paragraph_index: 9, cfi_start: locations.cfiForPosition(0, 9, row.char_start), cfi_end: locations.cfiForPosition(0, 9, row.char_end), cfi_range: locations.cfiForRange(0, 9, row.char_start, row.char_end) }))]);
+  await app.store.getWordBank("A");
+  assert.deepEqual(app.contentRequests, [], "unmatched legacy occurrences must not load any current book");
 });
 
 test("Word Bank API enforces authentication, account guards, same origin, no-store and streamed body limits", async () => {

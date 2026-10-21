@@ -3,6 +3,7 @@ import { neon } from "@neondatabase/serverless";
 import { books } from "@/data/books";
 import { getBookContent, type BookContent } from "@/lib/book-content";
 import { cfiForPosition, parseEpubCfi } from "@/lib/epub-location";
+import { ensureLibraryEditionTransitions } from "@/lib/library-edition-transition";
 import type { LibraryAction, LibraryRequest, LibraryState, ReadingProgress, SavedPassage } from "@/lib/library-types";
 
 export class LibraryError extends Error {
@@ -103,6 +104,7 @@ async function requireContent(bookId: string): Promise<BookContent> {
 
 export async function getLibraryState(userId: string): Promise<LibraryState> {
   const sql = database();
+  await ensureLibraryEditionTransitions(userId, sql);
   const [progressRows, savedRows, bookmarkRows] = await sql.transaction([
     sql`SELECT book_id, edition_id, chapter_index, paragraph_index, char_offset
         FROM readlay_progress WHERE user_id = ${userId}
@@ -173,6 +175,8 @@ export async function applyLibraryAction(userId: string, action: LibraryAction):
   if (content.editionId !== action.editionId || !positionExists(content, action)) {
     throw new LibraryError(400, "Invalid reading location.");
   }
+  // Claim the transition before a bookmark can be removed, so it cannot reappear.
+  await ensureLibraryEditionTransitions(userId, sql);
 
   if (action.type === "progress") {
     if (!precisePositionExists(content, action)) throw new LibraryError(400, "Invalid reading location.");

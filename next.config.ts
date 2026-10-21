@@ -11,8 +11,9 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/read/*": [".local/books/*.json", ".local/reader/*.json"],
     "/api/book-assets/*": [".local/books/*.json", ".local/reader/*.json", ".local/book-assets/**/*"],
-    "/api/library": [".local/books/*.json"],
-    "/api/word-bank": [".local/books/*.json"],
+    "/api/library": [".local/books/*.json", ".local/edition-migrations/seven-habits.json"],
+    "/api/word-bank": [".local/books/*.json", ".local/edition-migrations/seven-habits.json"],
+    "/api/edition-migrations": [".local/books/seven-habits.json", ".local/edition-migrations/seven-habits.json"],
     "/api/audio/*": [".local/books/*.json", ...audiobookMetadata],
   },
   // Automatic directory tracing must not package local preparation assets.
@@ -31,6 +32,10 @@ const nextConfig: NextConfig = {
       ".local/audio-models/**/*",
       ".local/verification-runtime/**/*",
       ".local/*-qa/**/*",
+      ".local/pdf-review/**/*",
+      ".local/pdf-import/**/*",
+      ".local/pdf-import-review/**/*",
+      ".local/editions/**/*",
       ".local/**/*.mp3",
       ".local/**/*.opus",
       ".local/**/*.epub",

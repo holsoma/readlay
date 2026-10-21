@@ -19,7 +19,7 @@ export interface Book {
   accent: string;
   placeholder: boolean;
   availability: "pending" | "available";
-  format: "EPUB" | "Web reader";
+  format: "EPUB" | "PDF" | "Web reader";
   readingMinutes: number | null;
   audioAvailable: false;
   editionId?: string;
@@ -28,6 +28,7 @@ export interface Book {
   paragraphCount?: number;
   isComplete?: boolean;
   availabilityNote?: string;
+  illustrationCount?: number;
 }
 
 interface ImportedBookStats {
@@ -38,6 +39,8 @@ interface ImportedBookStats {
   paragraphCount: number;
   isComplete?: boolean;
   availabilityNote?: string;
+  sourceFormat?: "EPUB" | "PDF";
+  illustrationCount?: number;
 }
 
 const importedStats = importedBooks as Record<string, ImportedBookStats>;
@@ -203,6 +206,8 @@ export const books: Book[] = catalogue.map((book) => {
         paragraphCount: stats.paragraphCount,
         isComplete: stats.isComplete,
         availabilityNote: stats.availabilityNote,
+        format: stats.sourceFormat ?? book.format,
+        illustrationCount: stats.illustrationCount,
       }
     : book;
 });

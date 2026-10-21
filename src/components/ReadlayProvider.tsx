@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { books } from "@/data/books";
 import { cfiForPosition, parseEpubCfi } from "@/lib/epub-location";
 import type { LibraryAction, LibraryState, ReadingProgress, SavedPassage } from "@/lib/library-types";
+import { cachedRetiredEditions, migrateCachedLibrary, parseEditionMigration, type EditionMigration } from "@/lib/edition-migration";
 
 export type { ReadingProgress, SavedPassage } from "@/lib/library-types";
 export type SyncStatus = "local" | "syncing" | "synced" | "error";
@@ -128,7 +129,43 @@ function ReadlayStateProvider({ children, userId, sessionReady }: { children: Re
     let syncing = false;
     let syncAgain = false;
     let needsPull = true;
+    let migrationReady = false;
     const controller = new AbortController();
+
+    async function prepareEditionCache() {
+      let raw: string | null;
+      try { raw = localStorage.getItem(key); if (raw === null && !userId) raw = localStorage.getItem("readlay-v3"); }
+      catch { migrationReady = true; return; }
+      const transitions = cachedRetiredEditions(raw, books);
+      if (!raw || !transitions.length) { migrationReady = true; return; }
+      const migrations: EditionMigration[] = [];
+      for (const transition of transitions) {
+        const params = `bookId=${encodeURIComponent(transition.bookId)}&from=${encodeURIComponent(transition.fromEditionId)}&to=${encodeURIComponent(transition.toEditionId)}`;
+        const response = await request(`/api/edition-migrations?${params}`);
+        const declared = response.headers.get("content-length");
+        if (declared && Number(declared) > 4 * 1024 * 1024) throw new Error("Edition transition too large.");
+        const body = await response.text();
+        if (body.length > 4 * 1024 * 1024) throw new Error("Edition transition too large.");
+        const migration = parseEditionMigration(JSON.parse(body));
+        if (!migration || migration.bookId !== transition.bookId || migration.fromEditionId !== transition.fromEditionId || migration.toEditionId !== transition.toEditionId) throw new Error("Edition transition unavailable.");
+        migrations.push(migration);
+      }
+      await cacheLock(() => {
+        // Another tab may have saved since the request began. Project its latest cache.
+        const latest = localStorage.getItem(key) ?? (!userId ? localStorage.getItem("readlay-v3") : null);
+        if (latest) {
+          for (const migration of migrations) {
+            const archive = `${key}:edition-backup:${migration.bookId}:${migration.fromEditionId}:${migration.toEditionId}`;
+            if (localStorage.getItem(archive) === null) localStorage.setItem(archive, latest);
+          }
+          const value: unknown = JSON.parse(latest);
+          const migrated = migrateCachedLibrary(value, migrations);
+          const wrapped = record(migrated) && Array.isArray(migrated.pending) ? migrated : { base: migrated, pending: [] };
+          localStorage.setItem(key, JSON.stringify(wrapped));
+        }
+        migrationReady = true;
+      });
+    }
 
     function readCache() {
       try {
@@ -210,6 +247,7 @@ function ReadlayStateProvider({ children, userId, sessionReady }: { children: Re
     }
     commands.current = {
       enqueue(create) {
+        if (!migrationReady) { setToast("Connect once to restore your place in the updated edition."); return; }
         void cacheLock(() => {
           const current = readCache();
           const entry = create(projectedState(current));
@@ -224,6 +262,7 @@ function ReadlayStateProvider({ children, userId, sessionReady }: { children: Re
       },
     };
     async function initialise() {
+      await prepareEditionCache();
       await cacheLock(() => publish(readCache(), false));
       if (!mounted) return;
       if (userId) await synchronise();
@@ -238,13 +277,17 @@ function ReadlayStateProvider({ children, userId, sessionReady }: { children: Re
         }
       }).catch(() => {});
     }
-    function refresh() { if (document.visibilityState === "visible") void synchronise(true); }
+    function refresh() {
+      if (document.visibilityState !== "visible") return;
+      if (!migrationReady) void initialise().catch(() => { if (mounted) { setReady(true); setSyncStatus("error"); } });
+      else void synchronise(true);
+    }
     window.addEventListener("storage", receiveStorage);
     window.addEventListener("online", refresh);
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", refresh);
     const retry = window.setInterval(() => { if (cache.pending.length && document.visibilityState === "visible") void synchronise(); }, 30_000);
-    void initialise().catch(() => { if (mounted) { setReady(true); setSyncStatus(userId ? "error" : "local"); } });
+    void initialise().catch(() => { if (mounted) { setReady(true); setSyncStatus("error"); } });
     return () => {
       mounted = false;
       controller.abort();

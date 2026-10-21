@@ -870,28 +870,57 @@ def write_json(path: Path, data: dict) -> None:
     temporary.replace(path)
 
 
+def existing_json_object(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ImportFailure("Existing import metadata must be an object")
+    return value
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-dir", type=Path, default=Path.home() / "Downloads", help="Directory containing the eight EPUB files")
+    parser.add_argument("--book", choices=tuple(BOOKS), action="append", help="Import only selected EPUB books; may be repeated. Active PDF editions cannot be overwritten.")
     args = parser.parse_args()
+    stats_path = PROJECT_ROOT / "src/data/imported-books.json"
+    report_path = PROJECT_ROOT / ".local/cleanup-report.json"
+    try:
+        previous_stats = existing_json_object(stats_path)
+        previous_report = existing_json_object(report_path)
+        if not all(isinstance(value,dict) for value in previous_stats.values()) or not isinstance(previous_report.get("books",{}),dict):
+            raise ImportFailure("Existing book import metadata is invalid")
+    except (ImportFailure,OSError,ValueError) as error:
+        parser.exit(1,f"Import stopped before changes: {error}\n")
+    selected = list(dict.fromkeys(args.book)) if args.book else list(BOOKS)
+    protected = [book_id for book_id in selected if previous_stats.get(book_id,{}).get("sourceFormat") == "PDF"]
+    if args.book and protected:
+        parser.error(f"Cannot replace active PDF edition for {', '.join(protected)} with an EPUB. Use the staged edition workflow and migrate saved positions before activating a replacement.")
     if not args.source_dir.is_dir():
         parser.error("The EPUB source directory does not exist")
-    results = {}
+    results = previous_stats.copy()
     pending = {}
-    cleanup_reports = {}
+    cleanup_reports = previous_report.get("books",{}).copy()
     try:
-        for book_id, (title, filename) in BOOKS.items():
+        for book_id in selected:
+            if book_id in protected:
+                print(f"Kept PDF edition {previous_stats[book_id].get('editionId','unknown')} for {book_id}.")
+                continue
+            title, filename = BOOKS[book_id]
             source = resolve_source(args.source_dir, book_id, filename)
             content, stats, report = import_book(source, book_id, title)
             pending[book_id] = content
-            results[book_id] = stats
+            previous = previous_stats.get(book_id,{})
+            results[book_id] = {**previous,**stats} if previous.get("editionId") == stats.get("editionId") else stats
             cleanup_reports[book_id] = report
     except (ImportFailure, OSError, zipfile.BadZipFile) as error:
         parser.exit(1, f"Import stopped for {book_id}: {error}\n")
     for book_id, content in pending.items():
         write_json(PROJECT_ROOT / ".local" / "books" / f"{book_id}.json", content)
-    write_json(PROJECT_ROOT / "src" / "data" / "imported-books.json", results)
-    write_json(PROJECT_ROOT / ".local" / "cleanup-report.json", {"parserVersion": PARSER_VERSION, "books": cleanup_reports})
+    if pending:
+        write_json(stats_path, results)
+        write_json(report_path, {**previous_report,"parserVersion": PARSER_VERSION, "books": cleanup_reports})
     print(json.dumps(results, indent=2))
 
 

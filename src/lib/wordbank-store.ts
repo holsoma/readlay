@@ -2,12 +2,14 @@ import "server-only";
 import { Buffer } from "node:buffer";
 import { neon } from "@neondatabase/serverless";
 import { books } from "@/data/books";
-import { getBookContent } from "@/lib/book-content";
+import { getBookContent, type BookContent } from "@/lib/book-content";
 import { DictionaryError, getDictionaryLookup } from "@/lib/dictionary";
 import { inflectionCandidates, normaliseDictionaryWord } from "@/lib/dictionary-word";
 import { parseDictionaryEntry, type DictionaryEntry } from "@/lib/dictionary-types";
 import { cfiForPosition, cfiForRange, isTextBoundary, wordsInText } from "@/lib/epub-location";
-import { isWordStatus, parseWordBank, type SavedWord, type SaveWordInput, type WordBankAction, type WordBankRequest } from "@/lib/wordbank-types";
+import { isWordStatus, parseWordBank, type SavedWord, type SaveWordInput, type WordBankAction, type WordBankRequest, type WordOccurrence } from "@/lib/wordbank-types";
+import { getEditionMigrations } from "@/lib/edition-migration-store";
+import { migrateWordOccurrence } from "@/lib/edition-migration";
 
 export class WordBankError extends Error {
   constructor(public readonly status: 400 | 401 | 404 | 409 | 429 | 502 | 503, message: string) {
@@ -122,6 +124,34 @@ export async function getWordBank(userId: string): Promise<SavedWord[]> {
     updatedAt: iso(row.updated_at), occurrences: occurrences.get(String(row.id)) ?? [],
   })) });
   if (!words) throw new WordBankError(503, "Your Word Bank could not be loaded. Try again.");
+  const migrations = await getEditionMigrations();
+  const projectedBooks = new Map<string, Promise<BookContent | null>>();
+  for (const word of words) {
+    for (const migration of migrations) {
+      const current = new Set(word.occurrences.filter((item) => item.bookId === migration.bookId && item.editionId === migration.toEditionId)
+        .map((item) => `${item.chapterIndex}:${item.paragraphIndex}:${item.charStart}:${item.charEnd}`));
+      const projected: WordOccurrence[] = [];
+      for (const occurrence of word.occurrences) {
+        const mapped = migrateWordOccurrence(migration, occurrence);
+        if (!mapped) { projected.push(occurrence); continue; }
+        const key = `${mapped.chapterIndex}:${mapped.paragraphIndex}:${mapped.charStart}:${mapped.charEnd}`;
+        if (current.has(key)) continue;
+        let pendingBook = projectedBooks.get(mapped.bookId);
+        if (!pendingBook) { pendingBook = getBookContent(mapped.bookId); projectedBooks.set(mapped.bookId, pendingBook); }
+        const content = await pendingBook;
+        const paragraph = content?.chapters[mapped.chapterIndex]?.paragraphs[mapped.paragraphIndex];
+        const targetWord = content?.editionId === mapped.editionId && typeof paragraph === "string" &&
+          isTextBoundary(paragraph, mapped.charStart) && isTextBoundary(paragraph, mapped.charEnd)
+          ? wordsInText(paragraph).find((token) => token.charStart === mapped.charStart && token.charEnd === mapped.charEnd) : null;
+        if (!targetWord) { projected.push(occurrence); continue; }
+        current.add(key);
+        // Highlight matching uses the exact current spelling. The original sentence
+        // and stored occurrence stay unchanged when an edition changes typography.
+        projected.push({ ...mapped, selectedText: targetWord.text });
+      }
+      word.occurrences = projected;
+    }
+  }
   return words;
 }
 

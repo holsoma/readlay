@@ -1,0 +1,4 @@
+# Local preparation only. The production Next.js application does not use Python.
+pypdf==6.10.0
+pdfplumber==0.11.9
+Pillow==12.3.0

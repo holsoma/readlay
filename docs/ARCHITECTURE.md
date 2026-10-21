@@ -34,6 +34,10 @@ There is no real-time speech endpoint. Next.js has no Python, PyTorch, Kokoro or
 
 Positions are zero-based `{chapterIndex, paragraphIndex, charOffset}`, scoped to book and edition. `charOffset` counts UTF-16 code units, matching browser selection offsets. Cleaning or replacing an edition invalidates previous coordinates rather than applying them to different text. Older paragraph-only progress resumes at character zero. The additive database migration preserves existing progress and bookmarks.
 
+The complete Seven Habits PDF is prepared offline by `scripts/import_pdf_book.py` using a reviewed 282-page source profile. It emits the same canonical book and reader-presentation schemas as EPUB preparation, plus private source-page, text-coverage and figure provenance. The website does not require Python or a PDF parser. The replacement includes 22 sections and 54 validated PNG diagrams; its format label comes from imported catalogue statistics.
+
+`scripts/map_book_editions.py` matches unique word sequences and bounded intervening passages, retaining original UTF-16 ranges. Its numeric-only manifest maps old paragraph anchors and exact word ranges into the new edition. Runtime validation checks every target against the current canonical text. Migration 004 records each account's completed transition. A single PostgreSQL statement claims the transition and copies progress and bookmarks, retaining old rows and existing new-edition positions. Source changes between snapshot and claim cause a guarded retry. The marker prevents removed bookmarks from reappearing on later requests. Browser caches receive account-scoped backups before conversion; Word Bank projections retain stored definitions and original contexts. Unmatched locations remain in retained legacy data rather than being assigned guessed offsets.
+
 The preparation command exports a canonical EPUB from the cleaned edition. Its chapter bodies contain paragraph elements with one text node each, allowing stable standard CFIs. `src/lib/epub-location.ts` and the Python exporter use the same spine, paragraph and character coordinates. These CFIs address Readlay's exported edition, not the unmodified publisher EPUB. The private canonical EPUB is retained with local preparation files. The web reader uses the corresponding text coordinates without requiring an EPUB rendering library.
 
 ## Reader presentation
@@ -63,6 +67,7 @@ Version 1 paragraph MP3 manifests remain readable with their actual precision la
 | `/api/auth/*` | Auth.js GitHub OAuth and sessions |
 | `GET /api/library` | Current account's progress, saved books and bookmarks |
 | `POST /api/library` | Validated, idempotent progress/save/bookmark action |
+| `GET /api/edition-migrations?bookId=...&from=...&to=...` | Validated edition identifiers and numeric offsets only, requested for a retired browser cache |
 | `GET /api/dictionary?word=<word>` | Authenticated compatibility lookup when the provider accepts server requests |
 | `GET /api/word-bank` | Current account's saved vocabulary and source occurrences |
 | `POST /api/word-bank` | Save a source word, change its learning status or remove it |

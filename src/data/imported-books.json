@@ -8,14 +8,15 @@
     "omittedImageCount": 46
   },
   "seven-habits": {
-    "editionId": "b17d5f5bc348f3d6",
-    "wordCount": 61356,
-    "readingMinutes": 246,
-    "chapterCount": 10,
-    "paragraphCount": 1454,
-    "omittedImageCount": 40,
-    "isComplete": false,
-    "availabilityNote": "The supplied file ends during Habit 4. Habits 5 to 7 are missing."
+    "editionId": "e63776fc2fbb656a",
+    "wordCount": 117671,
+    "readingMinutes": 471,
+    "chapterCount": 22,
+    "paragraphCount": 2585,
+    "isComplete": true,
+    "sourceFormat": "PDF",
+    "omittedImageCount": 0,
+    "illustrationCount": 54
   },
   "win-friends": {
     "editionId": "4e90894c75296431",

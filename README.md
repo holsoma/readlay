@@ -35,6 +35,8 @@ Book text, generated audio, model files and credentials are excluded from this r
 
 Keep the original EPUBs. They contain the structure and images used by `scripts/prepare_reader.py` to create private reader presentation files. Reviewed display corrections repair damaged source tokens without changing the canonical offsets used by saved locations and narration. This is a checked repair layer, not a guarantee that every source OCR error has been removed. See the [setup guide](docs/SETUP.md) for preparation and deployment.
 
+Seven Habits uses a reviewed complete PDF edition with all seven habits and 54 diagrams. Its local PDF importer preserves paragraph structure and extracts figures into the existing reader. Edition migration maps verified old words to the replacement, retains original account records and browser cache backups, and preserves matching bookmarks and Word Bank links. Python PDF tools are preparation dependencies only. The supplied DDIA draft is not part of the catalogue.
+
 ## Documentation
 
 - [Setup and deployment](docs/SETUP.md)
@@ -51,6 +53,7 @@ npm test
 npm run build
 python -m unittest discover -s scripts/audio/tests
 python -m unittest scripts.test_prepare_reader scripts.test_import_books
+python -m unittest scripts.test_import_pdf_book scripts.test_map_book_editions
 ```
 
 ## Licence
