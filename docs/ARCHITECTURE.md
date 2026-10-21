@@ -13,6 +13,10 @@ flowchart TD
   Storage --> Player[Browser audio player]
   Manifests --> Player
   Text --> Reader[Next.js ebook reader]
+  EPUB --> Presentation[Local source structure and reviewed display repairs]
+  Presentation --> Reader
+  Presentation --> Images[Private validated book illustrations]
+  Images --> Reader
   Reader <--> Player
   GitHub[GitHub OAuth through Auth.js] --> Session[Signed session]
   Session --> Reader
@@ -31,6 +35,14 @@ There is no real-time speech endpoint. Next.js has no Python, PyTorch, Kokoro or
 Positions are zero-based `{chapterIndex, paragraphIndex, charOffset}`, scoped to book and edition. `charOffset` counts UTF-16 code units, matching browser selection offsets. Cleaning or replacing an edition invalidates previous coordinates rather than applying them to different text. Older paragraph-only progress resumes at character zero. The additive database migration preserves existing progress and bookmarks.
 
 The preparation command exports a canonical EPUB from the cleaned edition. Its chapter bodies contain paragraph elements with one text node each, allowing stable standard CFIs. `src/lib/epub-location.ts` and the Python exporter use the same spine, paragraph and character coordinates. These CFIs address Readlay's exported edition, not the unmodified publisher EPUB. The private canonical EPUB is retained with local preparation files. The web reader uses the corresponding text coordinates without requiring an EPUB rendering library.
+
+## Reader presentation
+
+`scripts/prepare_reader.py` reuses the importer with optional source metadata and verifies that every paragraph still matches the canonical edition. It writes an additive manifest in `.local/reader`, leaving book bytes, paragraph indices and edition IDs unchanged. Supported source styles identify internal headings, quotations, lists and captions. Image boundaries are mapped to existing paragraph indices. The local command decodes permitted raster images with Pillow, strips metadata and writes bounded JPEG files under `.local/book-assets`. Cover-only, decorative and whole-page advertising images are excluded. These files are not published in Git or `public`.
+
+The reader loads the validated manifest on the server. Source headings use semantic heading levels, list groups use list semantics, and illustrations have reserved dimensions, lazy loading and full-size links. The image endpoint checks GitHub sign-in before reading content and only serves filenames listed in the edition's validated manifest. Successful image responses use private browser caching; failures are not cached.
+
+Edition-scoped rules in `src/data/reader-corrections.json` contain reviewed single-token spelling changes and exact occurrence repairs. The preparation script verifies whole-word source ranges in UTF-16 units. `reader-presentation.ts` rejects stale, partial or unsafe corrections again at runtime. Each rendered word retains its original source start and end. Several displayed words split from one joined source token have separate display identifiers and dictionary queries, but share that original range. Later words retain their original coordinates. Saved vocabulary highlights distinguish the corrected dictionary headword, while source sentences, CFIs and audio alignment remain canonical. Separate audio timing for parts of a damaged source token requires a new aligned recording. This repair layer does not infer missing passages or guarantee that all OCR errors are removed.
 
 ## Audio contract
 
@@ -52,6 +64,7 @@ Version 1 paragraph MP3 manifests remain readable with their actual precision la
 | `GET /api/dictionary?word=<word>` | Authenticated compatibility lookup when the provider accepts server requests |
 | `GET /api/word-bank` | Current account's saved vocabulary and source occurrences |
 | `POST /api/word-bank` | Save a source word, change its learning status or remove it |
+| `GET /api/book-assets/<bookId>/<assetId>` | Authenticated, manifest-listed illustration for the current edition |
 | `GET /api/audio/<bookId>` | Narrators for the current edition |
 | `GET /api/audio/<bookId>?narrator=<id>` | Validated synchronisation manifest |
 | `GET /api/audio/<bookId>?narrator=<id>&index=1` | Small chapter index without word timing arrays |
@@ -70,6 +83,8 @@ Word updates change the reader state immediately. Persistence is debounced durin
 
 The player keeps current and next chapter timing data in memory and bounds optional audio prefetch to 2 MiB. Data-saving connections skip that prefetch. Larger chapters still stream normally, so network delays can interrupt a chapter change; preloading is not a guarantee of offline availability.
 
+The same audio player remains mounted in a fixed bottom dock while the article scrolls. Read and Listen from here are always available, with playback, timeline and extra controls in listening mode. The dock measures its height to reserve space beneath the article, respects mobile safe areas and stays outside animated page containers. Dictionary popups position above it. Switching mode uses the latest explicit word selection through the existing shared position callback and does not create a second audio element.
+
 ## Dictionary and Word Bank
 
 The current reader renders cleaned EPUB text directly into the page and scrolls by chapter. It has no EPUB iframe or paginated rendition. `epub-selection.ts` reads ranges from the article's owner document, checks exact lexical word boundaries and records the containing sentence and canonical CFI range. DOM word spans retain their source UTF-16 offsets when fonts or layout change. A future iframe or pagination adapter must supply these same source coordinates and translate its selection rectangle to the outer viewport; there is no claim of testing an iframe renderer that the application does not use.
@@ -80,12 +95,12 @@ The shared lookup and parsing modules bound response size, request time, in-flig
 
 Migration `003_word_bank.sql` adds words and source occurrences. A word is unique per authenticated account and resolved dictionary headword. Each occurrence is unique by word, edition, chapter, paragraph and exact start/end offsets. Saving an existing word at another location adds context without resetting its learning status or first saved date. The browser submits the displayed dictionary snapshot. The server checks its bounded structure, headword against the selected word's inflection candidates, definition text and safe media URLs. An explicit spelling correction supplies a separate normalised `lookupWord` with the displayed snapshot; the headword must match that query's inflection candidates. The original source word and offsets still undergo the same server validation. Definitions are private account data, not independently verified public content. The server derives source spelling, sentence and CFIs from the book, rejecting arbitrary client paths or text. Composite ownership constraints and cascading deletion keep occurrences attached to their account's words.
 
-Damaged EPUB text can produce tokens that neither dictionary recognises. The popup accepts a corrected-spelling query only on submission, cancels obsolete results and clearly distinguishes the definition headword from the selected source text. Edition-specific suggestions for reviewed source errors are optional choices, never automatic corrections. Source paragraphs, edition IDs and all stored offsets remain immutable. This avoids moving existing reading progress, highlights and audio mappings. A clean replacement edition requires a separate migration rather than editing the current text in place.
+Damaged EPUB text can produce tokens that neither dictionary recognises. Reviewed presentation repairs use the displayed word for lookup while retaining its canonical source range. For remaining errors, the popup accepts a corrected-spelling query on submission, cancels obsolete results and distinguishes the definition headword from the selected source text. Edition-specific lookup suggestions remain optional choices. Source paragraphs, edition IDs and all stored offsets remain immutable. A clean replacement edition requires a separate migration rather than editing the current text in place.
 
 `WordBankProvider` is separate from reading progress. It uses the existing GitHub session, serialises pulls and mutations, discards responses after account changes and refreshes on focus, reconnection and cross-tab invalidation. Vocabulary and sentences stay in server storage and account-scoped memory; local storage carries only an invalidation marker. Word Bank API responses are private and never cached publicly. The page searches words, definitions and source context, sorts entries, updates New/Learning/Learned status and links back through the stored canonical CFI start coordinates. Saved highlights apply only to recorded occurrences in the matching book edition. Their dotted underline differs from native selection and the current narration marker. Removing a word removes its occurrences and highlights.
 
 ## Operations
 
-The Vercel build applies the versioned database migration before Next.js, keeping database credentials in Vercel. Only book JSON and audio manifests are traced into the relevant server functions. Python, model weights and generated audio remain outside deployment.
+The Vercel build applies the versioned database migration before Next.js, keeping database credentials in Vercel. Private book JSON, reader presentation manifests, validated illustrations and audio manifests are traced into their relevant server functions. Python, Pillow, model weights and generated audio remain outside deployment.
 
 Generation and upload are operator commands, never production requests. Partial generation records its chapter coverage. Deploy manifests after their immutable Opus objects upload. Supabase is the existing private storage service; no second storage account is required. The uploader reuses matching immutable objects and verifies uploaded hashes. Storage and bandwidth remain subject to the provider's free allowances, even though narration and alignment use no paid API. Local caches have no automatic expiry; retain backups if permanent recovery is required.

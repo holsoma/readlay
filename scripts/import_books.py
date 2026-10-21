@@ -360,7 +360,8 @@ def extract_text(root: ET.Element, large_classes: set[str]) -> ExtractedText:
         if tag in {"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "figcaption"}:
             classes = sorted({value for child in node.iter() for value in child.get("class", "").split()})
             for index in range(start, end):
-                attributes.setdefault(index, {"tag": tag, "classes": classes})
+                full_bold = any(local_name(child.tag) in {"strong", "b"} and normalise_text("".join(child.itertext())) == paragraphs[index] for child in node.iter())
+                attributes.setdefault(index, {"tag": tag, "classes": classes, **({"fullBold": True} if full_bold else {})})
         if tag in {"h1", "h2", "h3", "h4", "h5", "h6"} and end > start:
             title = " ".join(paragraphs[start:end])
             if len(title) <= 250:
@@ -484,7 +485,7 @@ def heading_only(title: str, paragraphs: list[str], metadata: list[dict]) -> boo
     return False
 
 
-def clean_chapters(chapters: list[dict], book_id: str, book_title: str, source_info: dict) -> tuple[list[dict], dict]:
+def clean_chapters(chapters: list[dict], book_id: str, book_title: str, source_info: dict, include_source: bool = False) -> tuple[list[dict], dict]:
     """Scan every paragraph, retaining the work rather than publication furniture."""
     before = {
         "sections": len(chapters),
@@ -742,10 +743,10 @@ def clean_chapters(chapters: list[dict], book_id: str, book_title: str, source_i
         raise ImportFailure("Cleanup paragraph accounting does not balance")
     if sum(reason["words"] for reason in reasons.values()) != report["removedWords"]:
         raise ImportFailure("Cleanup word accounting does not balance")
-    return [{"id": c["id"], "title": c["title"], "paragraphs": c["paragraphs"]} for c in result], report
+    return [{"id": c["id"], "title": c["title"], "paragraphs": c["paragraphs"], **({"_source": c["_source"]} if include_source else {})} for c in result], report
 
 
-def import_book(source: Path, book_id: str, book_title: str) -> tuple[dict, dict, dict]:
+def import_book(source: Path, book_id: str, book_title: str, include_source: bool = False) -> tuple[dict, dict, dict]:
     if source.stat().st_size > MAX_ARCHIVE_BYTES:
         raise ImportFailure("EPUB exceeds the archive size limit")
     digest = hashlib.sha256((PARSER_VERSION + "\0").encode())
@@ -840,7 +841,7 @@ def import_book(source: Path, book_id: str, book_title: str) -> tuple[dict, dict
                 chapters.append({"id": chapter_id, "title": breaks[start][0], "paragraphs": paragraphs, "_source": origins[start:end]})
         if not chapters:
             raise ImportFailure("EPUB has no readable text")
-        chapters, cleanup_report = clean_chapters(chapters, book_id, book_title, source_info)
+        chapters, cleanup_report = clean_chapters(chapters, book_id, book_title, source_info, **({"include_source": True} if include_source else {}))
         paragraph_count = sum(len(chapter["paragraphs"]) for chapter in chapters)
         word_count = sum(len(WORD_RE.findall(paragraph)) for chapter in chapters for paragraph in chapter["paragraphs"])
         if word_count < 100:

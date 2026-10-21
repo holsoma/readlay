@@ -6,12 +6,12 @@ Read ebooks and switch to prepared audiobooks at your selected word.
 
 ## Features
 
-- Read on desktop or mobile, with adjustable text size and themes.
+- Read on desktop or mobile, with adjustable text size and themes, source headings, quotations, lists and illustrations.
 - Sign in with GitHub to synchronise reading progress, saved books and bookmarks.
 - Look up a word with a tap, double-click or text selection, then save its definition and original context to your Word Bank.
 - Check a second free dictionary when the first has no entry. For damaged EPUB spelling, look up a corrected word while retaining its original reading location.
 - Search saved vocabulary, track New, Learning and Learned words, and return to their exact book locations.
-- Choose Listen from here for a selected word, then return to the word being narrated. Looking up and saving words preserves your reading and audio positions.
+- Use the persistent Listen from here control for a selected word, then return to the word being narrated. Looking up and saving words preserves your reading and audio positions.
 - Choose a narrator and a playback speed from 0.75× to 2×.
 - Prepare narration and word alignment locally with Kokoro and a free acoustic model. The website streams existing chapter Opus files without a speech API or GPU. Older paragraph MP3 recordings remain supported at their original precision.
 
@@ -31,6 +31,8 @@ Open [localhost:4401](http://localhost:4401). The catalogue works without creden
 
 Book text, generated audio, model files and credentials are excluded from this repository. Import editions you have permission to host before deploying your own reader.
 
+Keep the original EPUBs. They contain the structure and images used by `scripts/prepare_reader.py` to create private reader presentation files. Reviewed display corrections repair damaged source tokens without changing the canonical offsets used by saved locations and narration. This is a checked repair layer, not a guarantee that every source OCR error has been removed. See the [setup guide](docs/SETUP.md) for preparation and deployment.
+
 ## Documentation
 
 - [Setup and deployment](docs/SETUP.md)
@@ -44,6 +46,7 @@ npm run lint
 npm test
 npm run build
 python -m unittest discover -s scripts/audio/tests
+python -m unittest scripts.test_prepare_reader scripts.test_import_books
 ```
 
 ## Licence

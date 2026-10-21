@@ -1,10 +1,11 @@
 "use client";
 
-import { Headphones, Pause, Play, RotateCcw, RotateCw, Volume2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Headphones, Pause, Play, RotateCcw, RotateCw, Volume2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Chapter } from "@/data/books";
 import { parseAudioChapter, parseAudioManifestIndex, parseAudioNarrators, type AudioManifest, type AudioManifestIndex, type AudioNarratorSummary } from "@/lib/audio-types";
 import { isManifestForEdition, positionAtTime, seekTimeForPosition, type AudioPosition } from "@/lib/audio-sync";
+import "./audio-dock.css";
 
 export type ReaderMode = "reading" | "listening";
 export type AudioSeekRequest = AudioPosition & { revision: number };
@@ -28,6 +29,7 @@ function dataSaver() { return typeof navigator !== "undefined" && !!(navigator a
 export default function AudiobookPlayer(props: PlayerProps) {
   const { bookId, editionId, bookTitle, author, chapters, location, seekRequest, mode, onModeChange, onPositionChange, onReturnToReading, getReadingPosition } = props;
   const audio = useRef<HTMLAudioElement>(null);
+  const dock = useRef<HTMLElement>(null);
   const [narrators, setNarrators] = useState<AudioNarratorSummary[] | null>(null);
   const [narratorId, setNarratorId] = useState("");
   const [index, setIndex] = useState<AudioManifestIndex | null>(null);
@@ -42,6 +44,7 @@ export default function AudiobookPlayer(props: PlayerProps) {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [retry, setRetry] = useState(0);
+  const [expanded, setExpanded] = useState(false);
   const callbacks = useRef({ onModeChange, onPositionChange, onReturnToReading, getReadingPosition });
   const locationRef = useRef(location);
   const modeRef = useRef(mode);
@@ -65,6 +68,23 @@ export default function AudiobookPlayer(props: PlayerProps) {
   useEffect(() => { locationRef.current = location; }, [location]);
   useEffect(() => { modeRef.current = mode; if (mode === "reading") { playIntent.current = false; audio.current?.pause(); } }, [mode]);
   useEffect(() => { rateRef.current = rate; if (audio.current) audio.current.playbackRate = rate; }, [rate]);
+
+  useEffect(() => {
+    const element = dock.current;
+    const page = element?.closest<HTMLElement>(".reader-page");
+    if (!element || !page) return;
+    const property = "--reader-audio-dock-height";
+    const previous = page.style.getPropertyValue(property);
+    const update = () => page.style.setProperty(property, `${Math.ceil(element.getBoundingClientRect().height)}px`);
+    update();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
+    observer?.observe(element);
+    return () => {
+      observer?.disconnect();
+      if (previous) page.style.setProperty(property, previous);
+      else page.style.removeProperty(property);
+    };
+  }, [expanded, mode, error, loadingManifest]);
 
   const releaseUnusedBlobs = useCallback(() => {
     const element = audio.current;
@@ -351,23 +371,34 @@ export default function AudiobookPlayer(props: PlayerProps) {
   const maxTime = duration || currentChapter?.durationSeconds || 0;
   const src = target?.src;
   const exact = index?.alignment === "word";
+  const controlsId = `reader-audio-controls-${bookId}`;
 
-  return <section className={`reader-audio ${mode === "listening" ? "is-listening" : ""}`} aria-label="Reading and listening">
-    <div className="reader-audio-heading">
-      <div className="reader-mode-controls" role="group" aria-label="Reading mode"><button aria-pressed={mode === "reading"} onClick={returnToReading}>Read</button><button data-reader-listen aria-pressed={mode === "listening"} disabled={!canListen || loadingManifest} onClick={listenFromHere}><Headphones size={16} aria-hidden="true" />Listen from here</button></div>
-      {narrators && narrators.length > 1 ? <label className="reader-narrator"><span>Narrator</span><select aria-label="Audiobook narrator" value={narratorId} onChange={(event) => changeNarrator(event.target.value)}>{narrators.map((narrator) => <option key={narrator.id} value={narrator.id}>{narrator.name}</option>)}</select></label> : index && <span className="reader-narrator-name">{index.narrator.name}</span>}
-    </div>
-    {mode === "listening" && index && <div className="reader-audio-controls">
-      <div className="reader-audio-transport">
-        <button className="reader-audio-play" onClick={togglePlaying} aria-label={playing ? "Pause audiobook" : "Play audiobook"}>{playing ? <Pause size={20} aria-hidden="true" /> : <Play size={20} aria-hidden="true" />}</button>
-        <button className="reader-icon-button" aria-label="Rewind 15 seconds" onClick={() => seek(time - 15)} disabled={!target || waiting}><RotateCcw size={18} aria-hidden="true" /><span className="reader-rewind-number">15</span></button>
-        <button className="reader-icon-button" aria-label="Forward 15 seconds" onClick={() => seek(time + 15)} disabled={!target || waiting}><RotateCw size={18} aria-hidden="true" /><span className="reader-rewind-number">15</span></button>
-        <div className="reader-audio-position"><span>{currentChapter?.title ?? chapters[location.chapterIndex]?.title}</span><span aria-live="off">{clock(time)} / {clock(maxTime)}</span></div>
-        <label className="reader-audio-speed"><span>Speed</span><select aria-label="Audiobook playback speed" value={rate} onChange={(event) => { const next = Number(event.target.value); if (rates.some((value) => value === next)) { setRate(next); if (audio.current) audio.current.playbackRate = next; savePreferences(narratorId, next); } }}>{rates.map((value) => <option key={value} value={value}>{value === 1 || value === 2 ? value.toFixed(1) : value}x</option>)}</select></label>
+  return <section ref={dock} className={`reader-audio reader-audio-dock ${mode === "listening" ? "is-listening" : ""}`} data-expanded={expanded} aria-label="Reading and listening">
+    <div className="audio-dock-summary">
+      <div className="audio-dock-context"><span>{bookTitle}</span><span>{mode === "listening" ? currentChapter?.title ?? chapters[location.chapterIndex]?.title : chapters[location.chapterIndex]?.title}</span></div>
+      <div className="reader-mode-controls" role="group" aria-label="Reading mode">
+        <button aria-pressed={mode === "reading"} onClick={returnToReading}>Read</button>
+        <button data-reader-listen aria-label="Listen from here" aria-pressed={mode === "listening"} disabled={!canListen || loadingManifest} onPointerDown={(event) => { if (mode === "reading") event.preventDefault(); }} onClick={listenFromHere}><Headphones size={16} aria-hidden="true" />{mode === "listening" ? "Listening" : "Listen from here"}</button>
       </div>
+      {mode === "listening" && index && <button className="reader-audio-play" onClick={togglePlaying} aria-label={playing ? "Pause audiobook" : "Play audiobook"}>{playing ? <Pause size={20} aria-hidden="true" /> : <Play size={20} aria-hidden="true" />}</button>}
+      {!!narrators?.length && <button className="reader-icon-button audio-dock-expand" aria-label={expanded ? "Fewer audio controls" : "More audio controls"} aria-expanded={expanded} aria-controls={controlsId} onClick={() => setExpanded((value) => !value)}>{expanded ? <ChevronDown size={19} aria-hidden="true" /> : <ChevronUp size={19} aria-hidden="true" />}</button>}
+    </div>
+    {mode === "listening" && index && <div className="audio-dock-timeline">
+      <span aria-live="off">{clock(time)}</span>
       <label className="reader-audio-seek"><span className="sr-only">Audio position in current chapter</span><input type="range" min={0} max={maxTime || 1} step={0.01} value={Math.min(time, maxTime || 1)} disabled={!target || maxTime <= 0 || waiting} aria-valuetext={`${clock(time)} of ${clock(maxTime)}`} onChange={(event) => seek(Number(event.target.value))} /></label>
-      <label className="reader-audio-chapters"><span>Chapter</span><select aria-label="Audiobook chapter" value={target?.chapterIndex ?? location.chapterIndex} onChange={(event) => { reportTime(true); void openPosition({ chapterIndex: Number(event.target.value), paragraphIndex: 0, charOffset: 0 }, !!audio.current && !audio.current.paused); }}>{index.chapters.map((item) => <option key={item.chapterIndex} value={item.chapterIndex}>{item.chapterIndex + 1}. {item.title}</option>)}</select></label>
+      <span aria-live="off">{clock(maxTime)}</span>
     </div>}
+    <div id={controlsId} className="audio-dock-details" hidden={!expanded}>
+      {mode === "listening" && index && <>
+        <div className="audio-dock-adjustments">
+          <div className="audio-dock-skips"><button className="reader-icon-button" aria-label="Rewind 15 seconds" onClick={() => seek(time - 15)} disabled={!target || waiting}><RotateCcw size={18} aria-hidden="true" /><span className="reader-rewind-number">15</span></button><button className="reader-icon-button" aria-label="Forward 15 seconds" onClick={() => seek(time + 15)} disabled={!target || waiting}><RotateCw size={18} aria-hidden="true" /><span className="reader-rewind-number">15</span></button></div>
+          <label className="reader-audio-speed"><span>Speed</span><select aria-label="Audiobook playback speed" value={rate} onChange={(event) => { const next = Number(event.target.value); if (rates.some((value) => value === next)) { setRate(next); if (audio.current) audio.current.playbackRate = next; savePreferences(narratorId, next); } }}>{rates.map((value) => <option key={value} value={value}>{value === 1 || value === 2 ? value.toFixed(1) : value}x</option>)}</select></label>
+          {narrators && narrators.length > 1 ? <label className="reader-narrator"><span>Narrator</span><select aria-label="Audiobook narrator" value={narratorId} onChange={(event) => changeNarrator(event.target.value)}>{narrators.map((narrator) => <option key={narrator.id} value={narrator.id}>{narrator.name}</option>)}</select></label> : index && <span className="reader-narrator-name">{index.narrator.name}</span>}
+        </div>
+        <label className="reader-audio-chapters"><span>Chapter</span><select aria-label="Audiobook chapter" value={target?.chapterIndex ?? location.chapterIndex} onChange={(event) => { reportTime(true); void openPosition({ chapterIndex: Number(event.target.value), paragraphIndex: 0, charOffset: 0 }, !!audio.current && !audio.current.paused); }}>{index.chapters.map((item) => <option key={item.chapterIndex} value={item.chapterIndex}>{item.chapterIndex + 1}. {item.title}</option>)}</select></label>
+      </>}
+      {mode === "reading" && (narrators && narrators.length > 1 ? <label className="reader-narrator"><span>Narrator</span><select aria-label="Audiobook narrator" value={narratorId} onChange={(event) => changeNarrator(event.target.value)}>{narrators.map((narrator) => <option key={narrator.id} value={narrator.id}>{narrator.name}</option>)}</select></label> : index && <span className="reader-narrator-name">Narrated by {index.narrator.name}</span>)}
+    </div>
     {!error && <p className="reader-audio-status" role="status">{message || (narrators === null || loadingManifest ? "Checking audio…" : !narrators.length ? "Audio is not available for this edition." : chapterPrepared && !chapterLoaded ? "Loading audio positions…" : !canListen ? "Audio is not available at this position." : mode === "listening" ? waiting ? "Loading audio…" : <><Volume2 size={13} aria-hidden="true" />Paragraph {location.paragraphIndex + 1}. {exact ? "Switch to Read to return to this word." : "This recording resumes at paragraph boundaries."}</> : exact ? "Look up a word, then choose Listen from here to hear it." : "Paragraph audio. Listening starts at the beginning of the selected paragraph.")}</p>}
     {error && <div className="reader-audio-error"><p role="alert">{error}</p><button onClick={retryAudio}>Retry audio</button></div>}
     <audio ref={audio} preload="metadata" src={src}

@@ -13,6 +13,7 @@ import { useReadlay } from "./ReadlayProvider";
 import { PronunciationButton } from "./PronunciationButton";
 
 type LookupState = { kind: "loading" } | { kind: "ready"; lookup: DictionaryLookup } | { kind: "missing" | "error"; message: string };
+const audioDockFor = (box: HTMLElement | null) => box?.closest?.(".reader-page")?.querySelector<HTMLElement>(".reader-audio.reader-audio-dock") ?? null;
 
 export default function DictionaryPopup({ selection, bookId, editionId, getAnchor, onClose, onUsePosition }: {
   selection: AnchoredWordSelection; bookId: string; editionId: string;
@@ -24,8 +25,8 @@ export default function DictionaryPopup({ selection, bookId, editionId, getAncho
   const [attempt, setAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
-  const [lookupWord, setLookupWord] = useState(() => normaliseDictionaryWord(selection.word));
-  const [spelling, setSpelling] = useState(selection.selectedText);
+  const [lookupWord, setLookupWord] = useState(() => normaliseDictionaryWord(selection.lookupWord ?? selection.word));
+  const [spelling, setSpelling] = useState(selection.displayText ?? selection.selectedText);
   const [editingSpelling, setEditingSpelling] = useState(false);
   const [spellingError, setSpellingError] = useState("");
   const [placement, setPlacement] = useState<CSSProperties>({ left: Math.max(12, selection.anchor.left), top: selection.anchor.bottom + 10, visibility: "hidden" });
@@ -96,29 +97,35 @@ export default function DictionaryPopup({ selection, bookId, editionId, getAncho
     const topEdge = viewport?.offsetTop ?? 0;
     const width = viewport?.width ?? window.innerWidth;
     const height = viewport?.height ?? window.innerHeight;
+    const dock = audioDockFor(box)?.getBoundingClientRect();
+    const viewportBottom = topEdge + height;
+    const bottomEdge = dock && dock.width > 0 && dock.height > 0 && dock.bottom > topEdge && dock.top < viewportBottom
+      ? Math.min(viewportBottom, dock.top - 8) : viewportBottom;
     const margin = 12;
     const boxWidth = Math.min(360, width - margin * 2);
-    const maximumHeight = Math.min(460, height - margin * 2);
+    const maximumHeight = Math.min(460, Math.max(80, bottomEdge - topEdge - margin * 2));
     // A loading popup can already be constrained by the available space below.
     // Read its complete contents, rather than treating that earlier cap as the
     // natural height when definitions or pronunciation controls arrive.
     const borderHeight = Math.max(0, box.offsetHeight - box.clientHeight);
     const contentHeight = box.scrollHeight + borderHeight;
     const naturalHeight = Math.min(Math.max(box.getBoundingClientRect().height, contentHeight), maximumHeight);
-    const below = topEdge + height - margin - anchor.bottom - 10;
+    const below = bottomEdge - margin - anchor.bottom - 10;
     const above = anchor.top - topEdge - margin - 10;
     const placeBelow = below >= naturalHeight || (above < naturalHeight && below >= above);
     // Keep the source word uncovered, including between the two native clicks.
     const maxHeight = Math.min(maximumHeight, Math.max(80, placeBelow ? below : above));
     const boxHeight = Math.min(naturalHeight, maxHeight);
     const idealTop = placeBelow ? anchor.bottom + 10 : anchor.top - boxHeight - 10;
-    setPlacement({ width: boxWidth, maxHeight, left: Math.max(leftEdge + margin, Math.min(anchor.left, leftEdge + width - boxWidth - margin)), top: Math.max(topEdge + margin, Math.min(idealTop, topEdge + height - boxHeight - margin)), visibility: "visible" });
+    setPlacement({ width: boxWidth, maxHeight, left: Math.max(leftEdge + margin, Math.min(anchor.left, leftEdge + width - boxWidth - margin)), top: Math.max(topEdge + margin, Math.min(idealTop, bottomEdge - boxHeight - margin)), visibility: "visible" });
   }, [getAnchor, selection.anchor]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(position);
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(position);
     if (popup.current) observer?.observe(popup.current);
+    const dock = audioDockFor(popup.current);
+    if (dock) observer?.observe(dock);
     window.addEventListener("resize", position);
     window.addEventListener("scroll", position, true);
     window.visualViewport?.addEventListener("resize", position);

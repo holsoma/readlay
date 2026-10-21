@@ -1,0 +1,15 @@
+.reader-prose .reader-text-block{font-family:var(--font-newsreader),Georgia,serif;color:var(--reader-text);font-size:var(--reader-font-size,23px);font-weight:400;line-height:1.75;letter-spacing:-.15px;overflow-wrap:break-word}
+.reader-prose .reader-paragraph-heading,.reader-prose .reader-paragraph-subheading{color:var(--reader-ink);line-height:1.2;letter-spacing:-.55px;text-wrap:balance;margin:1.8em 0 .75em;font-size:calc(var(--reader-font-size,23px) * 1.32);font-weight:500}
+.reader-prose .reader-paragraph-subheading{font-size:calc(var(--reader-font-size,23px) * 1.13);letter-spacing:-.25px;margin-top:1.5em}
+.reader-prose .reader-paragraph-quote{margin:1.45em 0;padding:0 0 0 22px;border-left:2px solid var(--reader-accent);font-style:italic;font-size:calc(var(--reader-font-size,23px) * 1.04);line-height:1.6}
+.reader-prose .reader-paragraph-list-item{position:relative}
+.reader-prose .reader-paragraph-list-item.has-implicit-marker{padding-left:1.1em}
+.reader-prose .reader-paragraph-list-item.has-implicit-marker::before{content:"•";position:absolute;left:0;color:var(--reader-accent);font-size:.7em;top:.3em}
+.reader-list{margin-block:25px}
+.reader-prose .reader-paragraph-caption{font-family:var(--font-manrope),sans-serif;font-size:12px;letter-spacing:0;line-height:1.75;color:var(--reader-muted);margin-top:-8px}
+.reader-illustration{margin:42px 0 38px;break-inside:avoid;max-width:100%}
+.reader-illustration img{display:block;width:auto;max-width:100%;height:auto;margin-inline:auto;background:#fff;object-fit:contain;border:1px solid var(--reader-line)}
+.reader-illustration figcaption{margin:12px auto 0;max-width:58ch;font-family:var(--font-manrope),sans-serif;font-size:11px;line-height:1.7;text-align:center;color:var(--reader-muted)}
+.reader-prose .reader-text-block:focus-visible{outline:1px solid var(--reader-accent);outline-offset:8px}
+.reader-article h1{text-wrap:balance}
+@media(max-width:600px){.reader-illustration{margin-block:30px}.reader-illustration figcaption{font-size:10px;text-align:left}.reader-prose .reader-paragraph-quote{padding-left:16px}.reader-prose .reader-paragraph-heading{font-size:calc(var(--reader-font-size,23px) * 1.23)}}

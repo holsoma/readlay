@@ -1,0 +1,276 @@
+/* These selectors also win when the reader's global stylesheet loads later. */
+.reader-page {
+  padding-bottom: calc(var(--reader-audio-dock-height, 130px) + 28px);
+}
+
+.reader-page .reader-passage,
+.reader-page .reader-word {
+  scroll-margin-bottom: calc(var(--reader-audio-dock-height, 130px) + 24px);
+}
+
+.reader-page .reader-word {
+  scroll-margin-top: 90px;
+}
+
+.reader-page .reader-audio.reader-audio-dock {
+  position: fixed;
+  z-index: 20;
+  inset: auto max(20px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+  box-sizing: border-box;
+  width: auto;
+  max-width: 860px;
+  max-height: min(420px, calc(100dvh - 120px));
+  margin: 0 auto;
+  padding: 12px 18px 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--reader-line);
+  border-radius: 12px;
+  background: var(--reader-panel);
+  color: var(--reader-ink);
+  box-shadow: 0 7px 34px #15291c18;
+}
+
+.reader-page .reader-audio-dock .audio-dock-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.reader-page .reader-audio-dock .audio-dock-context {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 12px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.reader-page .reader-audio-dock .audio-dock-context > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-page .reader-audio-dock .audio-dock-context > span:first-child {
+  font-weight: 650;
+}
+
+.reader-page .reader-audio-dock .audio-dock-context > span:last-child {
+  font-size: 10px;
+  color: var(--reader-muted);
+}
+
+.reader-page .reader-audio-dock .reader-mode-controls {
+  flex: none;
+  gap: 3px;
+}
+
+.reader-page .reader-audio-dock .reader-mode-controls > button {
+  min-width: 48px;
+  min-height: 44px;
+  padding: 9px 13px;
+  border-radius: 5px;
+  font-size: 12px;
+}
+
+.reader-page .reader-audio-dock .reader-mode-controls > button[data-reader-listen] {
+  border-color: var(--reader-line);
+}
+
+.reader-page .reader-audio-dock .reader-mode-controls > button[data-reader-listen]:not(:disabled) {
+  color: var(--reader-paper);
+  border-color: var(--reader-ink);
+  background: var(--reader-ink);
+}
+
+.reader-page .reader-audio-dock .reader-mode-controls > button[data-reader-listen]:not(:disabled):hover {
+  opacity: .86;
+}
+
+.reader-page .reader-audio-dock .reader-audio-play,
+.reader-page .reader-audio-dock .reader-icon-button {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.reader-page .reader-audio-dock .reader-icon-button:hover {
+  transform: none;
+}
+
+.reader-page .reader-audio-dock .audio-dock-expand {
+  margin-left: 2px;
+  border-color: var(--reader-line);
+}
+
+.reader-page .reader-audio-dock .audio-dock-timeline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 1px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--reader-muted);
+}
+
+.reader-page .reader-audio-dock .audio-dock-timeline > span {
+  min-width: 32px;
+}
+
+.reader-page .reader-audio-dock .audio-dock-timeline > span:last-child {
+  text-align: right;
+}
+
+.reader-page .reader-audio-dock .reader-audio-seek {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.reader-page .reader-audio-dock .audio-dock-details {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 10px 0 0;
+  padding: 11px 0 3px;
+  border-top: 1px solid var(--reader-line);
+}
+
+.reader-page .reader-audio-dock .audio-dock-details[hidden] {
+  display: none;
+}
+
+.reader-page .reader-audio-dock .audio-dock-adjustments,
+.reader-page .reader-audio-dock .audio-dock-skips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.reader-page .reader-audio-dock .audio-dock-adjustments > .reader-narrator,
+.reader-page .reader-audio-dock .audio-dock-adjustments > .reader-narrator-name {
+  margin-left: auto;
+}
+
+.reader-page .reader-audio-dock .reader-narrator,
+.reader-page .reader-audio-dock .reader-audio-speed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.reader-page .reader-audio-dock .reader-narrator > span,
+.reader-page .reader-audio-dock .reader-audio-speed > span {
+  display: inline;
+}
+
+.reader-page .reader-audio-dock .reader-narrator-name {
+  width: auto;
+  padding: 0;
+  font-size: 11px;
+}
+
+.reader-page .reader-audio-dock .reader-audio-chapters {
+  min-width: 0;
+}
+
+.reader-page .reader-audio-dock select,
+.reader-page .reader-audio-dock .reader-audio-error > button {
+  min-height: 44px;
+}
+
+.reader-page .reader-audio-dock .reader-audio-status {
+  margin: 7px 0 0;
+  min-height: 16px;
+  font-size: 10px;
+}
+
+.reader-page .reader-audio-dock.is-listening .reader-audio-status {
+  margin-top: 0;
+}
+
+.reader-page .reader-audio-dock button:focus-visible,
+.reader-page .reader-audio-dock select:focus-visible,
+.reader-page .reader-audio-dock input:focus-visible {
+  outline: 2px solid var(--reader-accent);
+  outline-offset: 3px;
+}
+
+@media (max-width: 650px) {
+  .reader-page .reader-audio.reader-audio-dock {
+    inset: auto 0 0;
+    max-width: none;
+    max-height: min(380px, calc(100dvh - 96px));
+    padding: 11px max(17px, env(safe-area-inset-right)) calc(9px + env(safe-area-inset-bottom)) max(17px, env(safe-area-inset-left));
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -5px 24px #15291c0e;
+  }
+
+  .reader-page .reader-audio-dock .audio-dock-context {
+    display: none;
+  }
+
+  .reader-page .reader-audio-dock .audio-dock-summary {
+    gap: 8px;
+  }
+
+  .reader-page .reader-audio-dock .reader-mode-controls {
+    flex: 1;
+  }
+
+  .reader-page .reader-audio-dock .reader-mode-controls > button {
+    font-size: 11px;
+    padding: 9px 12px;
+  }
+
+  .reader-page .reader-audio-dock .reader-mode-controls > button[data-reader-listen] {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .reader-page .reader-audio-dock .audio-dock-adjustments {
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+
+  .reader-page .reader-audio-dock .reader-audio-speed {
+    margin-left: auto;
+  }
+
+  .reader-page .reader-audio-dock .audio-dock-adjustments > .reader-narrator {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .reader-page .reader-audio-dock .reader-narrator select {
+    flex: 1;
+    max-width: 230px;
+  }
+
+  .reader-page .reader-audio-dock .reader-narrator-name {
+    font-size: 10px;
+  }
+
+  .reader-page .reader-audio-dock .reader-audio-status {
+    font-size: 10px;
+    line-height: 1.5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-page .reader-audio-dock * {
+    transition: none;
+  }
+}

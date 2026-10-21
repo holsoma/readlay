@@ -13,7 +13,7 @@ function text(tree) {
   return typeof tree === "string" ? tree : "";
 }
 const entry = { word: "habit", phonetic: "/ˈhæbɪt/", audioUrl: null, meanings: [{ partOfSpeech: "noun", definitions: [{ definition: "An action repeated regularly." }] }], sourceUrl: null, licence: null };
-function harness({ signedIn = true, saved = [], save = async () => ({}), anchor = { left: 360, right: 380, top: 790, bottom: 815, width: 20, height: 25 }, popupHeight = 330, popupScrollHeight = popupHeight - 2, word = "habit", bookId = "book", editionId = "edition", sourcePosition = {} } = {}) {
+function harness({ signedIn = true, saved = [], save = async () => ({}), anchor = { left: 360, right: 380, top: 790, bottom: 815, width: 20, height: 25 }, popupHeight = 330, popupScrollHeight = popupHeight - 2, word = "habit", bookId = "book", editionId = "edition", sourcePosition = {}, dockRect = null } = {}) {
   let cursor = 0, dirty = true, tree, mounted = true;
   const slots = [], effects = [], requests = [], notices = [], positions = [], listeners = new Map(), frames = [], observers = [];
   let closed = 0, auth = 0, positionsUsed = 0;
@@ -28,14 +28,15 @@ function harness({ signedIn = true, saved = [], save = async () => ({}), anchor 
   const props = { selection, bookId, editionId, getAnchor: () => selection.anchor, onClose: () => closed++, onUsePosition: () => positionsUsed++ };
   const Popup = loadTypeScript("src/components/DictionaryPopup.tsx", {
     stubs: { react, "next/link": "link", "react/jsx-runtime": { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) }, "lucide-react": { BookOpen: "icon", Check: "icon", Plus: "icon", X: "icon" }, "./WordBankProvider": { useWordBank: () => ({ words: saved, ready: true, isSignedIn: signedIn, saveWord: save }) }, "./ReadlayProvider": { useReadlay: () => ({ openAuth: () => auth++, notify: (message) => notices.push(message) }) }, "./PronunciationButton": { PronunciationButton: "pronunciation" }, "@/lib/dictionary-client": { lookupDictionaryInBrowser: (word, signal) => new Promise((resolve, reject) => requests.push({ word, options: { signal }, resolve, reject })) } },
-    globals: { Error, ResizeObserver: class { constructor(callback) { this.callback = callback; observers.push(this); } observe(target) { this.target = target; } disconnect() { this.disconnected = true; } }, fetch: (url, options) => new Promise((resolve, reject) => requests.push({ url, options, resolve, reject })), window: { innerWidth: 390, innerHeight: 844, requestAnimationFrame: (fn) => { frames.push(fn); return frames.length; }, cancelAnimationFrame() {}, addEventListener() {}, removeEventListener() {} }, document: { addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: (name) => listeners.delete(name) } },
+    globals: { Error, ResizeObserver: class { constructor(callback) { this.callback = callback; this.targets = []; observers.push(this); } observe(target) { this.targets.push(target); } disconnect() { this.disconnected = true; } }, fetch: (url, options) => new Promise((resolve, reject) => requests.push({ url, options, resolve, reject })), window: { innerWidth: 390, innerHeight: 844, requestAnimationFrame: (fn) => { frames.push(fn); return frames.length; }, cancelAnimationFrame() {}, addEventListener() {}, removeEventListener() {} }, document: { addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: (name) => listeners.delete(name) } },
   }).default;
-  const element = { contains: (target) => target?.inside, getBoundingClientRect: () => ({ height: popupHeight }), get scrollHeight() { return popupScrollHeight; }, get offsetHeight() { return popupHeight; }, get clientHeight() { return popupHeight - 2; }, focus() {} };
+  const dock = { getBoundingClientRect: () => dockRect };
+  const element = { contains: (target) => target?.inside, closest: () => dockRect ? { querySelector: () => dock } : null, getBoundingClientRect: () => ({ height: popupHeight }), get scrollHeight() { return popupScrollHeight; }, get offsetHeight() { return popupHeight; }, get clientHeight() { return popupHeight - 2; }, focus() {} };
   function render() { cursor = 0; dirty = false; tree = Popup(props); tree.props.ref.current = element; effects.splice(0).forEach((effect) => effect()); frames.splice(0).forEach((frame) => frame()); if (tree.props.style.visibility === "visible") positions.push(tree.props.style); }
   async function settle() { for (let i = 0; i < 8; i++) { if (dirty && mounted) render(); await new Promise((resolve) => setTimeout(resolve, 1)); } }
   function response(status, body) { if (status >= 200 && status < 300) requests.at(-1).resolve(body); else requests.at(-1).reject(Object.assign(new Error(body.error), { status })); }
   render();
-  return { requests, response, settle, notices, positions, observers, resize(height, scrollHeight = height - 2) { popupHeight = height; popupScrollHeight = scrollHeight; observers.findLast((observer) => !observer.disconnected)?.callback(); }, text: () => text(tree), element: (predicate) => find(tree, predicate), button: (label) => find(tree, (node) => node.type === "button" && text(node).includes(label)), style: () => tree.props.style, closed: () => closed, auth: () => auth, positionsUsed: () => positionsUsed, dismiss: (target) => listeners.get("pointerdown")?.({ target }), escape: () => listeners.get("keydown")?.({ key: "Escape", preventDefault() {} }), cleanup() { mounted = false; for (const slot of slots) slot?.cleanup?.(); } };
+  return { requests, response, settle, notices, positions, observers, resize(height, scrollHeight = height - 2) { popupHeight = height; popupScrollHeight = scrollHeight; observers.findLast((observer) => !observer.disconnected)?.callback(); }, resizeDock(rect) { dockRect = rect; observers.findLast((observer) => !observer.disconnected)?.callback(); }, text: () => text(tree), element: (predicate) => find(tree, predicate), button: (label) => find(tree, (node) => node.type === "button" && text(node).includes(label)), style: () => tree.props.style, closed: () => closed, auth: () => auth, positionsUsed: () => positionsUsed, dismiss: (target) => listeners.get("pointerdown")?.({ target }), escape: () => listeners.get("keydown")?.({ key: "Escape", preventDefault() {} }), cleanup() { mounted = false; for (const slot of slots) slot?.cleanup?.(); } };
 }
 
 test("popup shows loading, missing and retried definitions, and clamps to a small viewport", async (t) => {
@@ -229,4 +230,30 @@ test("curated source-error suggestions are edition-scoped and generic missing wo
     assert.ok(app.text().includes("Look up a corrected spelling"));
     assert.equal(app.requests.length, 1);
   }
+});
+
+test("a reviewed corrected display word looks up its visible spelling and saves the immutable source word and range", async (t) => {
+  const inputs = [];
+  const sourcePosition = { chapterIndex: 0, paragraphIndex: 0, charStart: 326, charEnd: 340, displayText: "congenial", lookupWord: "congenial", displayKey: "326:1" };
+  const app = harness({ word: "subdecongenial", sourcePosition, save: async (input) => { inputs.push(input); return {}; } }); t.after(() => app.cleanup());
+  assert.equal(app.requests[0].word, "congenial");
+  const congenial = { ...entry, word: "congenial", meanings: [{ partOfSpeech: "adjective", definitions: [{ definition: "Pleasant and agreeable." }] }] };
+  app.response(200, { query: "congenial", entry: congenial }); await app.settle();
+  assert.equal(text(app.element((node) => node.type === "h2")), "congenial");
+  assert.ok(app.text().includes("Selected text: subdecongenial"));
+  app.button("Save to Word Bank").props.onClick(); await app.settle();
+  assert.deepEqual(JSON.parse(JSON.stringify(inputs[0])), { word: "subdecongenial", lookupWord: "congenial", bookId: "book", editionId: "edition", chapterIndex: 0, paragraphIndex: 0, charStart: 326, charEnd: 340, entry: congenial });
+  app.button("Set reading place").props.onClick();
+  assert.equal(app.positionsUsed(), 1);
+});
+
+test("the dictionary stays above the fixed audio dock and observes dock size changes", async (t) => {
+  const anchor = { left: 50, right: 120, top: 450, bottom: 475, width: 70, height: 25 };
+  const app = harness({ anchor, popupHeight: 330, dockRect: { top: 640, bottom: 840, height: 200, width: 390 } }); t.after(() => app.cleanup()); await app.settle();
+  const bottom = () => app.style().top + Math.min(330, app.style().maxHeight);
+  assert.ok(bottom() <= 632);
+  assert.ok(bottom() <= anchor.top - 9 || app.style().top >= anchor.bottom + 9);
+  assert.equal(app.observers.findLast((observer) => !observer.disconnected).targets.length, 2, "the box and dock are both observed");
+  app.resizeDock({ top: 400, bottom: 840, height: 440, width: 390 }); await app.settle();
+  assert.ok(bottom() <= 392);
 });

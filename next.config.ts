@@ -9,7 +9,8 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   // These files are server-only. The reader and library API enforce sign-in.
   outputFileTracingIncludes: {
-    "/read/*": [".local/books/*.json"],
+    "/read/*": [".local/books/*.json", ".local/reader/*.json"],
+    "/api/book-assets/*": [".local/books/*.json", ".local/reader/*.json", ".local/book-assets/**/*"],
     "/api/library": [".local/books/*.json"],
     "/api/word-bank": [".local/books/*.json"],
     "/api/audio/*": [".local/books/*.json", ...audiobookMetadata],

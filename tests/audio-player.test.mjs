@@ -39,6 +39,11 @@ function content(tree) {
   if (typeof tree === "string" || typeof tree === "number") return String(tree);
   return tree && typeof tree === "object" ? content(tree.props?.children) : "";
 }
+function count(tree, predicate) {
+  if (Array.isArray(tree)) return tree.reduce((total, item) => total + count(item, predicate), 0);
+  if (!tree || typeof tree !== "object") return 0;
+  return Number(predicate(tree)) + count(tree.props?.children, predicate);
+}
 
 // Execute the component's real effects and handlers with deterministic hooks and media.
 // This checks state transitions, while the browser check covers actual audio playback.
@@ -101,7 +106,8 @@ function playerHarness({ source = manifest, textChapters = chapters, location = 
     stubs: {
       react,
       "react/jsx-runtime": { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }), Fragment: "fragment" },
-      "lucide-react": Object.fromEntries(["Headphones", "Pause", "Play", "RotateCcw", "RotateCw", "Volume2"].map((icon) => [icon, "icon"])),
+      "lucide-react": Object.fromEntries(["ChevronDown", "ChevronUp", "Headphones", "Pause", "Play", "RotateCcw", "RotateCw", "Volume2"].map((icon) => [icon, "icon"])),
+      "./audio-dock.css": {},
       "@/lib/audio-types": audioTypes,
       "@/lib/audio-sync": audioSync,
     },
@@ -144,6 +150,9 @@ function playerHarness({ source = manifest, textChapters = chapters, location = 
   }
   const app = {
     audio, props, mediaHandlers, requests, positions, blobUrls, settle,
+    dock: () => find(tree, (node) => node.type === "section" && node.props.className.includes("reader-audio-dock")).props,
+    details: () => find(tree, (node) => node.props?.className === "audio-dock-details").props,
+    audioCount: () => count(tree, (node) => node.type === "audio"),
     hide() { document.visibilityState = "hidden"; documentListeners.get("visibilitychange")?.(); },
     status: () => content(find(tree, (node) => node.props?.className === "reader-audio-status")),
     button: (label) => find(tree, (node) => node.type === "button" && node.props["aria-label"] === label).props,
@@ -413,4 +422,61 @@ test("retry replaces a failed cached source without retaining its Blob or its ob
   assert.ok(app.blobUrls.live.size <= 2);
   assert.ok(app.blobUrls.revoked.every((item) => item.unmounting || item.url !== item.currentSrc));
   app.cleanup(); assert.equal(app.blobUrls.live.size, 0);
+});
+
+test("persistent dock expansion keeps one audio element and does not interrupt playback", async (t) => {
+  const app = playerHarness({ source: wordManifest, textChapters: wordChapters }); t.after(() => app.cleanup());
+  await app.start();
+  const element = app.audioProps().ref.current;
+  const src = app.audioProps().src;
+  const requests = app.requests.length;
+  app.audio.currentTime = 2.4;
+  app.audioProps().onTimeUpdate(); await app.settle();
+  assert.equal(app.details().hidden, true);
+  app.button("More audio controls").onClick(); await app.settle();
+  assert.equal(app.dock()["data-expanded"], true);
+  assert.equal(app.details().hidden, false);
+  assert.equal(app.button("Fewer audio controls")["aria-controls"], app.details().id);
+  assert.equal(app.audioCount(), 1);
+  assert.equal(app.audioProps().ref.current, element);
+  assert.equal(app.audio.currentTime, 2.4);
+  assert.equal(app.audio.paused, false);
+  app.button("Fewer audio controls").onClick(); await app.settle();
+  assert.equal(app.details().hidden, true);
+  assert.equal(app.audio.paused, false);
+  app.read(); await app.settle();
+  assert.equal(app.props.mode, "reading");
+  assert.equal(app.audio.paused, true);
+  assert.equal(app.button("Listen from here").disabled, false);
+  assert.equal(app.audioCount(), 1);
+  assert.equal(app.audioProps().ref.current, element);
+  assert.equal(app.audioProps().src, src);
+  assert.equal(app.requests.length, requests, "showing controls does not fetch another recording");
+});
+
+test("dock Listen preserves a selected word until the reader callback consumes it", async (t) => {
+  const word = wordManifest.chapters[0].words[4];
+  const selectedPosition = { chapterIndex: 0, paragraphIndex: 0, charOffset: word.charStart, cfi: word.cfi };
+  const app = playerHarness({ source: wordManifest, textChapters: wordChapters, selectedPosition }); t.after(() => app.cleanup());
+  await app.settle();
+  let preserved = false;
+  const listen = app.button("Listen from here");
+  assert.equal(listen["data-reader-listen"], true, "dictionary outside-click handling recognises the persistent control");
+  listen.onPointerDown({ preventDefault() { preserved = true; } });
+  assert.equal(preserved, true);
+  listen.onClick(); await app.settle();
+  assert.equal(app.audio.currentTime, word.startSeconds);
+  assert.equal(app.props.location.cfi, word.cfi);
+});
+
+test("persistent Listen stays disabled when the open chapter has no prepared audio", async (t) => {
+  const config = twoChapterSource();
+  config.source = { ...config.source, coverage: { complete: false, totalChapters: 2, chapterIndices: [0] }, chapters: [config.source.chapters[0]] };
+  const app = playerHarness({ ...config, location: { chapterIndex: 1, paragraphIndex: 0 } }); t.after(() => app.cleanup());
+  await app.settle();
+  assert.equal(app.button("Listen from here").disabled, true);
+  assert.match(app.status(), /Audio is not available at this position/);
+  assert.equal(app.audioCount(), 1);
+  assert.equal(app.audio.paused, true);
+  assert.equal(app.requests.some(({ url }) => url.includes("&chapter=1")), false);
 });

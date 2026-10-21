@@ -5,6 +5,7 @@ export type SelectionAnchor = { left: number; top: number; right: number; bottom
 export type EpubWordSelection = {
   word: string; selectedText: string; chapterIndex: number; paragraphIndex: number;
   charStart: number; charEnd: number; cfiStart: string; cfiEnd: string; cfiRange: string; sentence: string;
+  displayText?: string; lookupWord?: string; displayKey?: string;
 };
 export type AnchoredWordSelection = EpubWordSelection & { anchor: SelectionAnchor; keyboard?: boolean };
 
@@ -33,6 +34,28 @@ export function wordSelectionAtOffsets(text: string, chapterIndex: number, parag
     cfiRange: cfiForRange(chapterIndex, paragraphIndex, selected.charStart, selected.charEnd), sentence: sentenceAround(text, selected.charStart, selected.charEnd) };
 }
 
+/** Display corrections can split a source token without changing its location. */
+export function wordSelectionFromElement(wordElement: HTMLElement, text: string, chapterIndex: number, paragraphIndex: number): EpubWordSelection | null {
+  const { wordStart, wordEnd, displayKey, lookupWord } = wordElement.dataset;
+  if (!/^\d+$/.test(wordStart ?? "") || !/^\d+$/.test(wordEnd ?? "")) return null;
+  const start = Number(wordStart);
+  const end = Number(wordEnd);
+  const source = wordSelectionAtOffsets(text, chapterIndex, paragraphIndex, start, end);
+  if (!source || source.charStart !== start || source.charEnd !== end) return null;
+  if (displayKey !== undefined) {
+    if (!/^\d+:\d+$/.test(displayKey)) return null;
+    const [keyStart, part] = displayKey.split(":").map(Number);
+    if (keyStart !== start || !Number.isSafeInteger(part) || displayKey !== `${start}:${part}`) return null;
+  }
+  const displayText = wordElement.textContent;
+  if (typeof displayText !== "string") return null;
+  const visibleWords = wordsInText(displayText);
+  if (visibleWords.length !== 1 || visibleWords[0].charStart !== 0 || visibleWords[0].charEnd !== displayText.length) return null;
+  const query = lookupWord === undefined ? null : normaliseDictionaryWord(lookupWord);
+  if (lookupWord === undefined ? displayText !== source.selectedText : !query || query !== normaliseDictionaryWord(displayText)) return null;
+  return { ...source, ...(displayKey === undefined ? {} : { displayKey }), ...(query ? { displayText, lookupWord: query } : {}) };
+}
+
 /** The owner document also makes this adapter safe for a future iframe reader. */
 export function captureEpubWordSelection(article: HTMLElement, paragraphs: string[], chapterIndex: number): AnchoredWordSelection | null {
   const doc = article.ownerDocument;
@@ -41,20 +64,39 @@ export function captureEpubWordSelection(article: HTMLElement, paragraphs: strin
   try {
     const range = selection.getRangeAt(0);
     const parent = (node: Node) => node.nodeType === 1 ? node as Element : node.parentElement;
-    const startParagraph = parent(range.startContainer)?.closest<HTMLParagraphElement>(".reader-passage p");
-    const endParagraph = parent(range.endContainer)?.closest<HTMLParagraphElement>(".reader-passage p");
+    const textBlockSelector = ".reader-passage .reader-text-block, .reader-passage p";
+    const startParagraph = parent(range.startContainer)?.closest<HTMLElement>(textBlockSelector);
+    const endParagraph = parent(range.endContainer)?.closest<HTMLElement>(textBlockSelector);
     if (!startParagraph || startParagraph !== endParagraph || !article.contains(startParagraph)) return null;
     const passage = startParagraph.closest<HTMLElement>("[data-paragraph]");
     const paragraphIndex = Number(passage?.dataset.paragraph);
     const text = paragraphs[paragraphIndex];
-    if (!Number.isInteger(paragraphIndex) || typeof text !== "string" || startParagraph.textContent !== text) return null;
+    if (!Number.isInteger(paragraphIndex) || typeof text !== "string") return null;
     const prefix = doc.createRange();
     prefix.selectNodeContents(startParagraph);
     prefix.setEnd(range.startContainer, range.startOffset);
     const start = prefix.toString().length;
     prefix.setEnd(range.endContainer, range.endOffset);
     const end = prefix.toString().length;
-    const result = wordSelectionAtOffsets(text, chapterIndex, paragraphIndex, start, end);
+    const renderedWords = typeof startParagraph.querySelectorAll === "function"
+      ? Array.from(startParagraph.querySelectorAll<HTMLElement>("[data-word-start][data-word-end]")) : [];
+    let result: EpubWordSelection | null;
+    if (renderedWords.length) {
+      const selectedWords = renderedWords.filter((word) => {
+        if (typeof range.intersectsNode === "function" && !range.intersectsNode(word)) return false;
+        prefix.setEnd(word, 0);
+        const visibleStart = prefix.toString().length;
+        const visibleEnd = visibleStart + (word.textContent?.length ?? 0);
+        return visibleEnd > start && visibleStart < end;
+      });
+      // Two displayed words can share the same canonical range. They still
+      // count as a multiple-word selection and must not become one lookup.
+      if (selectedWords.length !== 1) return null;
+      result = wordSelectionFromElement(selectedWords[0], text, chapterIndex, paragraphIndex);
+    } else {
+      if (startParagraph.textContent !== text) return null;
+      result = wordSelectionAtOffsets(text, chapterIndex, paragraphIndex, start, end);
+    }
     if (!result) return null;
     const rect = range.getBoundingClientRect();
     return { ...result, anchor: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height } };

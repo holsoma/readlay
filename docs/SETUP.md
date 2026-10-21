@@ -40,7 +40,20 @@ python scripts/import_books.py --source-dir "C:\path\to\epubs"
 
 The importer writes private text to `.local/books` and aggregate statistics to `src/data/imported-books.json`. Edition identifiers change when the input or cleanup rules change. Audio and saved locations from another edition are rejected. Printed contents, copyright pages, advertisements, repeated running headings and empty sections are removed. Substantive introductions, notes and book content are preserved.
 
-The reader presents text and omits images, diagrams and original layout. Reading estimates assume 250 words per minute. The supplied **The 7 Habits of Highly Effective People** file ends during Habit 4 and is labelled incomplete. Habits 5 to 7 cannot be recovered by cleaning that file.
+Keep EPUB as the source format for the mobile reader. Its structured text and embedded images can be rendered without preserving a fixed page size. PDF is useful for a page facsimile, but extracting it does not automatically preserve reading order or create reliable text locations. Readlay does not currently provide a PDF page renderer.
+
+After import, prepare the reader presentation with Python 3.10 or later and Pillow:
+
+```powershell
+python -m pip install Pillow
+python scripts/prepare_reader.py --source-dir "C:\path\to\epubs"
+```
+
+The command compares source paragraphs and editions with the existing canonical files and stops on a mismatch. It writes private `.local/reader/<bookId>.json` manifests and validated JPEG images in `.local/book-assets/<bookId>`. It recovers supported headings, quotations, lists, figure captions and image positions from the source. Covers, decorative assets and whole-page sales adverts are excluded. Each illustration opens at full size, and images load as the reader approaches them. Python and Pillow are preparation dependencies only.
+
+Reviewed spelling and spacing repairs live in `src/data/reader-corrections.json`, scoped to an edition. The prepared display retains original UTF-16 ranges, paragraph order and edition identifiers, so existing positions and audio remain valid. A split display token can contain several readable words with one original source range. It does not gain independent audio timestamps without regeneration and alignment. Manual dictionary correction remains available for unrepaired source errors. Do not apply broad replacements to valid words, names or uncertain passages.
+
+Reading estimates assume 250 words per minute. The supplied **The 7 Habits of Highly Effective People** file ends during Habit 4 and is labelled incomplete. Habits 5 to 7 cannot be recovered by cleaning that file.
 
 The catalogue contains Atomic Habits, The 7 Habits of Highly Effective People, How to Win Friends and Influence People, The 48 Laws of Power, The Power of Your Subconscious Mind, Rich Dad Poor Dad, The 5 AM Club and The Power of Now. Four topics organise these books. The original sample has been removed.
 
@@ -72,7 +85,7 @@ The Word Bank uses the existing GitHub identity and Neon connection. The normal 
 
 Open a word, choose Save to Word Bank, then use Word Bank in the sidebar, mobile navigation or reader toolbar. A repeat save at the same location is idempotent; saving the word elsewhere adds another original context. The Word Bank supports search, sorting, three learning states, removal and return links. Its saved occurrence highlights use edition-specific character ranges and remain stable after text size changes. Reimporting a changed edition does not apply old highlights to different text.
 
-If a definition is missing, use the popup's corrected-spelling field. This also handles words damaged in the supplied EPUB, such as joined or incorrectly recognised letters. Known source errors can offer optional lookup suggestions, scoped to that edition. The reader never chooses a suggestion automatically or changes book text. Saving uses the corrected dictionary headword while retaining the original selected text, sentence and exact source location. The Word Bank displays the original spelling where it differs from the saved word. A clean replacement EPUB must be imported as a new edition with position migration considered separately.
+The prepared reader uses reviewed display repairs for known source errors, with the visible word as its dictionary query. If a definition is still missing, use the popup's corrected-spelling field. Remaining known errors can offer optional lookup suggestions, scoped to that edition. Saving uses the corrected dictionary headword while retaining the original selected text, sentence and exact source location. The Word Bank displays the original spelling where it differs from the saved word. Canonical book text remains unchanged. A clean replacement EPUB must be imported as a new edition with position migration considered separately.
 
 ## Deploy to Vercel
 
@@ -82,7 +95,7 @@ If a definition is missing, use the popup's corrected-spelling field. This also 
 4. Run `npx vercel --prod` from this prepared directory. The build runs the migration using credentials already held in Vercel, then builds Next.js. A production database credential download is unnecessary.
 5. Verify GitHub sign-in, a bookmark, progress from another browser and an uploaded audio chapter before describing the deployment as fully connected.
 
-Private book JSON and audio manifests are included in the CLI deployment as server files. Opus files, MP3s, WAVs, canonical EPUBs, model weights, caches and Python environments are excluded. Audio streams from Supabase. Books and generated audio stay out of Git, so a Git-only deployment requires a separate private content delivery step. Never move them into `public`.
+Private book JSON, reader presentation manifests, validated book illustrations and audio manifests are included in the CLI deployment as server files. Illustrations are served through an authenticated endpoint, with private browser caching. Opus files, MP3s, WAVs, canonical EPUBs, model weights, caches and Python environments are excluded. Audio streams from Supabase. Books, illustrations and generated audio stay out of Git, so a Git-only deployment requires a separate private content delivery step. Never move them into `public`.
 
 ## Checks
 
@@ -91,6 +104,7 @@ npm run lint
 npm test
 npm run build
 python -m unittest discover -s scripts/audio/tests
+python -m unittest scripts.test_prepare_reader scripts.test_import_books
 ```
 
 The browser accessibility check uses `?__qa=1` and exposes JSON in `#readlay-qa`. Axe loads only when requested. Its local LCP/CLS readings are unthrottled; zero LCP means unavailable. Screenshot evidence and measured limits belong in `.jury`.
