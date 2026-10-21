@@ -381,6 +381,24 @@ async function nextChapter(app) {
   app.audioProps().onEnded(); await app.settle();
 }
 
+test("an internal chapter gap stops playback without preloading or skipping to later prepared audio", async (t) => {
+  const config = severalChapterSource(3);
+  config.source = { ...config.source, coverage: { complete: false, totalChapters: 3, chapterIndices: [0, 2] }, chapters: config.source.chapters.filter((chapter) => chapter.chapterIndex !== 1) };
+  const app = playerHarness(config); t.after(() => app.cleanup());
+  await app.start();
+  const source = app.audioProps().src;
+  const requestCount = app.requests.length;
+  assert.equal(app.requests.some(({ url }) => /[?&]chapter=[12](?:&|$)/.test(url)), false, "neither the missing chapter nor the later recording is preloaded");
+  assert.equal(app.blobUrls.created.length, 0);
+
+  await app.finish();
+  assert.equal(app.audio.paused, true);
+  assert.equal(app.props.location.chapterIndex, 0);
+  assert.equal(app.audioProps().src, source, "chapter end keeps the current recording instead of crossing the gap");
+  assert.equal(app.requests.length, requestCount, "chapter end does not request a missing or later chapter");
+  assert.equal(app.blobUrls.created.length, 0);
+});
+
 test("several chapter handovers retain only current and next Blob URLs, then release both on unmount", async (t) => {
   const app = playerHarness(severalChapterSource()); t.after(() => app.cleanup());
   await app.start();
