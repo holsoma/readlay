@@ -6,6 +6,9 @@ import { getR2QuotaStatus, R2QuotaError, r2Identity, r2QuotaRpc, reserveR2Operat
 const classA = new Set(["listbuckets", "putbucket", "listobjects", "listobjectsv2", "putobject", "copyobject", "completemultipartupload", "createmultipartupload", "lifecyclestoragetiertransition", "listmultipartuploads", "uploadpart", "uploadpartcopy", "listparts", "putbucketencryption", "putbucketcors", "putbucketlifecycleconfiguration"]);
 const classB = new Set(["headbucket", "headobject", "getobject", "usagesummary", "getbucketencryption", "getbucketlocation", "getbucketcors", "getbucketlifecycleconfiguration"]);
 const free = new Set(["deleteobject", "deletebucket", "abortmultipartupload"]);
+// Dashboard configuration reads occur in Analytics but have no explicit class in
+// the published pricing list. Charge both protective budgets rather than omit them.
+const conservative = new Set(["getbucketnotificationconfiguration", "getbucketsippyconfiguration"]);
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 function integer(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new Error("Invalid metric");
@@ -15,7 +18,7 @@ export type R2Snapshot = { period: string; classA: number; classB: number; month
 
 /** Account-wide, never a bucket-only approximation of the account free allowance. */
 export function parseCloudflareR2Metrics(value: unknown, bucket: string, now = new Date()): R2Snapshot {
-  if (!record(value) || (value.errors !== undefined && (!Array.isArray(value.errors) || value.errors.length)) || !record(value.data) || !record(value.data.viewer)) throw new Error("Invalid analytics response");
+  if (!record(value) || (value.errors != null && (!Array.isArray(value.errors) || value.errors.length)) || !record(value.data) || !record(value.data.viewer)) throw new Error("Invalid analytics response");
   const accounts = value.data.viewer.accounts;
   if (!Array.isArray(accounts) || accounts.length !== 1 || !record(accounts[0])) throw new Error("Account analytics unavailable");
   const operations = accounts[0].r2OperationsAdaptiveGroups, storage = accounts[0].r2StorageAdaptiveGroups;
@@ -28,6 +31,7 @@ export function parseCloudflareR2Metrics(value: unknown, bucket: string, now = n
     const action = row.dimensions.actionType.toLowerCase().replace(/[^a-z0-9]/g, ""), n = integer(row.sum.requests);
     if (classA.has(action)) a += n;
     else if (classB.has(action)) b += n;
+    else if (conservative.has(action)) { a += n; b += n; }
     else if (!free.has(action) && n) throw new Error("An R2 operation is not classified");
     }
     return { a: integer(a), b: integer(b) };

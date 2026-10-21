@@ -18,6 +18,8 @@ Cloudflare's account-level GraphQL analytics supply the calendar month's Class A
 
 Class A includes PUT and LIST; Class B includes GET, HEAD and usage queries. Readlay adds its recent reserved requests to the reported 31-day totals. Reservations from months overlapping the 31-day window are retained, including the whole first overlapping month. These counts deliberately overlap and may pause requests earlier than the Cloudflare dashboard would suggest. Failed, interrupted and uncertain requests are not refunded automatically. Cloudflare analytics can be delayed or sampled, so these are protective counters, not an invoice calculation.
 
+Cloudflare Analytics also reports the dashboard reads `GetBucketNotificationConfiguration` and `GetBucketSippyConfiguration`. The published pricing list does not give these an explicit class. Readlay conservatively adds each to both safety budgets. This is a protective overcount, not a claim about their billing classification. Other unrecognised operation names still pause requests pending review. Successful GraphQL responses may contain `errors: null` or an empty error list; actual or malformed errors remain blocked.
+
 ## Storage and concurrent uploads
 
 The protected storage total includes account-wide reported payload and metadata, an exact complete inventory of the Readlay bucket, other buckets' reported storage, and outstanding upload reservations. Recent per-bucket peaks make the estimate conservative. Each inventory page is a quota-checked Class A request.

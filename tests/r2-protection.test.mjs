@@ -94,9 +94,23 @@ test("account analytics cover other buckets and distinguish monthly totals from 
   assert.equal(result.storageBytes, 3020); assert.equal(result.otherStorageBytes, 2010);
   assert.equal(result.classA, 10); assert.equal(result.classB, 100); assert.equal(result.monthlyClassA, 3); assert.equal(result.monthlyClassB, 30);
 });
+
+test("Cloudflare null errors indicate success and reviewed dashboard reads consume both safety budgets", () => {
+  const value = metrics();
+  value.errors = null;
+  const account = value.data.viewer.accounts[0];
+  account.r2OperationsAdaptiveGroups.push(op("GetBucketNotificationConfiguration", 5), op("GetBucketSippyConfiguration", 10));
+  account.monthlyOperations.push(op("GetBucketSippyConfiguration", 2));
+  const result = metricsParser(value, bucket, now);
+  assert.equal(result.classA, 25); assert.equal(result.classB, 115);
+  assert.equal(result.monthlyClassA, 5); assert.equal(result.monthlyClassB, 32);
+  value.errors = [];
+  assert.equal(metricsParser(value, bucket, now).classA, 25);
+});
 test("missing, truncated, stale, unknown-operation and partial-error analytics never become zero usage", () => {
   for (const mutate of [
     value => { value.errors = [{ message: "partial failure" }]; },
+    value => { value.errors = "malformed error response"; },
     value => { value.data.viewer.accounts = []; },
     value => { value.data.viewer.accounts[0].r2StorageAdaptiveGroups = []; },
     value => { value.data.viewer.accounts[0].r2StorageAdaptiveGroups[0].dimensions.datetime = "2026-10-18T00:00:00Z"; },
