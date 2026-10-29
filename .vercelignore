@@ -52,3 +52,5 @@ supabase/.branches
 .local/audiobooks/*/*/*/*/**
 .local/audiobooks/original-fixture
 assets
+readlay-promo
+docs/media

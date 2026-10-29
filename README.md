@@ -1,25 +1,53 @@
+<div align="center">
+
+<a href="https://readlay.vercel.app">
+  <img src="src/app/icon.svg" alt="Readlay logo" width="80" height="80" />
+</a>
+
 # Readlay
 
-Read ebooks and switch to prepared audiobooks at your selected word.
+### Read. Listen. Keep your place.
 
-**[Open Readlay](https://readlay.vercel.app)**
+Read ebooks, switch to prepared narration at a selected word, and save vocabulary as you go.
+
+[![Web app](https://img.shields.io/badge/Open-Readlay-315B45?style=flat&labelColor=252D28)](https://readlay.vercel.app)
+[![Licence: MIT](https://img.shields.io/badge/Licence-MIT-315B45?style=flat&labelColor=252D28)](LICENSE)
+[![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-315B45?style=flat&labelColor=252D28)](docs/SETUP.md)
+
+[Open Readlay](https://readlay.vercel.app) · [Features](#features) · [Setup guide](docs/SETUP.md) · [Report an issue](https://github.com/holsoma/readlay/issues)
+
+<br />
+
+<a href="docs/media/readlay-promo.mp4">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/readlay-poster.png" />
+    <img src="docs/media/readlay-preview.gif" alt="Readlay demo: browse books, select a word and switch to narration without losing your place" width="800" />
+  </picture>
+</a>
+
+**[Watch the 15-second video](docs/media/readlay-promo.mp4)** · [View the still image](docs/media/readlay-poster.png)
+
+<sub>Silent demo with original sample text.</sub>
+
+</div>
 
 ## Features
 
-- Read on desktop or mobile, with adjustable text size and themes, source headings, quotations, lists and illustrations.
-- Sign in with GitHub to synchronise reading progress, saved books and bookmarks.
-- Look up a word with a tap, double-click or text selection, then save its definition and original context to your Word Bank.
-- Check a second free dictionary when the first has no entry. For damaged EPUB spelling, look up a corrected word while retaining its original reading location.
-- Search saved vocabulary, track New, Learning and Learned words, and return to their exact book locations.
-- Use the persistent Listen from here control for a selected word, then return to the word being narrated. Looking up and saving words preserves your reading and audio positions.
-- Choose a narrator and a playback speed from 0.75× to 2×.
-- Prepare narration and word alignment locally with Kokoro and a free acoustic model. The website streams existing chapter Opus files without a speech API or GPU. Older paragraph MP3 recordings remain supported at their original precision.
+- **Read on desktop and mobile.** Adjust text size, switch between light, sepia and dark themes, and view the book's headings, quotations, lists and illustrations.
+- **Listen from a word.** Select a word to start prepared narration there. Return to the reader at the word being spoken.
+- **Choose how you listen.** Switch between available female and male narrators, with playback speeds from 0.75× to 2×.
+- **Keep your place.** Sign in with GitHub to synchronise reading progress, saved books and bookmarks across devices.
+- **Look up words as you read.** Tap, double-click or select a word to see its definition without changing your reading or listening position.
+- **Build your Word Bank.** Save definitions with their original context, track New, Learning and Learned words, and return to where you found them.
 
-Built with Next.js, TypeScript, Auth.js, Neon PostgreSQL and private Supabase Storage, with optional private Cloudflare R2 support. Audio preparation uses Python separately from the website.
+Narration is available for prepared chapters and voices. Older paragraph-based recordings keep their original precision.
 
-Prepared recordings support Female (`af_heart`) and Male (`am_michael`) voice choices. Switching maps the current spoken word into the other recording, retaining playback speed and play/pause state. A voice is available only for chapters that have passed preparation and upload checks.
+## Get started
 
-## Run locally
+**[Open Readlay in your browser](https://readlay.vercel.app)**. Browse the catalogue, then sign in with GitHub to read and save your place.
+
+<details>
+<summary><strong>Run locally</strong></summary>
 
 Use Node.js 22 or later. From the repository root:
 
@@ -29,23 +57,30 @@ Copy-Item .env.example .env.local
 npm run dev -- --hostname 127.0.0.1 --port 4401
 ```
 
-Open [localhost:4401](http://localhost:4401). The catalogue works without credentials. Reading requires GitHub OAuth, a database and imported book text. Follow the [setup guide](docs/SETUP.md) to configure them.
+Open [localhost:4401](http://localhost:4401). The catalogue works without credentials. Reading requires GitHub OAuth, a database and imported book text. Follow the [setup guide](docs/SETUP.md) to configure these and run the database migrations.
 
-Book text, generated audio, model files and credentials are excluded from this repository. Import editions you have permission to host before deploying your own reader.
+Book text, generated recordings, model files and credentials are excluded from this repository. Import books you have permission to host.
 
-Keep the original EPUBs. They contain the structure and images used by `scripts/prepare_reader.py` to create private reader presentation files. Reviewed display corrections repair damaged source tokens without changing the canonical offsets used by saved locations and narration. This is a checked repair layer, not a guarantee that every source OCR error has been removed. See the [setup guide](docs/SETUP.md) for preparation and deployment.
-
-Seven Habits uses a reviewed complete PDF edition with all seven habits and 54 diagrams. Its local PDF importer preserves paragraph structure and extracts figures into the existing reader. Edition migration maps verified old words to the replacement, retains original account records and browser cache backups, and preserves matching bookmarks and Word Bank links. Python PDF tools are preparation dependencies only. The supplied DDIA draft is not part of the catalogue.
+</details>
 
 ## Documentation
 
-- [Setup and deployment](docs/SETUP.md)
-- [Architecture and word synchronisation](docs/ARCHITECTURE.md)
-- [Local Kokoro generation and audio upload](docs/AUDIO_PREPARATION.md)
+| Guide | Contents |
+| --- | --- |
+| [Setup and deployment](docs/SETUP.md) | Authentication, storage, book imports, illustrations and edition changes. |
+| [Architecture](docs/ARCHITECTURE.md) | Reading progress, bookmarks, vocabulary and word synchronisation. |
+| [Audio preparation](docs/AUDIO_PREPARATION.md) | Local Kokoro narration, word timing, voice preparation and uploads. |
+| [R2 usage protection](docs/R2_USAGE_PROTECTION.md) | Administrator setup, storage limits and request checks. These checks cannot guarantee zero charges. |
+| [Promo video](readlay-promo/README.md) | Edit the Remotion scenes and render the README video. |
 
-`scripts/generate_audiobook_catalogue.py` prepares both voices in a resumable local batch. Its unpublished staging folder stays separate from the website's active audio. Before deployment, run `python scripts/pack_audio_metadata.py` after verified uploads. The website packages losslessly compressed timing manifests, while recordings, models and Python environments remain outside Vercel.
+## Contributing
 
-## Checks
+Use [GitHub issues](https://github.com/holsoma/readlay/issues) for bugs and feature requests. For a bug, include your browser, the steps to reproduce it, and what you expected to happen. Keep credentials, private book text and generated recordings out of reports and pull requests.
+
+<details>
+<summary><strong>Development checks</strong></summary>
+
+Run the checks relevant to your changes:
 
 ```powershell
 npm run lint
@@ -56,9 +91,23 @@ python -m unittest scripts.test_prepare_reader scripts.test_import_books
 python -m unittest scripts.test_import_pdf_book scripts.test_map_book_editions
 ```
 
-## Licence
+Reading, narration, bookmarks and Word Bank links share a saved location. Changes to book text or editions must preserve existing locations or use a reviewed edition migration. See the [architecture guide](docs/ARCHITECTURE.md).
 
-Readlay's application code and original cover studies use the [MIT licence](LICENSE). Font licences are included in `src/fonts`. Books, generated narration and third-party model assets have separate rights and are not covered by Readlay's licence.
-## R2 usage protection
+</details>
 
-Readlay includes an administrator-only R2 usage page at `/admin/r2`, backed by the existing Supabase project. It checks storage and request budgets before uploads and audio requests, with default limits of 9 GB, 800,000 Class A and 8 million Class B operations. Configure the read-only Cloudflare Analytics token and admin GitHub IDs before enabling the release. Existing files are never deleted automatically. These checks cannot guarantee zero Cloudflare charges. See [setup and limitations](docs/R2_USAGE_PROTECTION.md).
+### Built with
+
+[Next.js](https://nextjs.org/) and [TypeScript](https://www.typescriptlang.org/) for the website, [Auth.js](https://authjs.dev/) for GitHub sign-in, and [Neon PostgreSQL](https://neon.com/) for saved progress. Prepared audio uses private [Supabase Storage](https://supabase.com/storage), with optional [Cloudflare R2](https://developers.cloudflare.com/r2/) support. Python prepares narration separately from the website.
+
+### Credits
+
+- [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) for locally prepared narration.
+- [Dictionary API](https://dictionaryapi.dev/) and [FreeDictionaryAPI.com](https://freedictionaryapi.com/) for word lookups.
+- [Manrope](src/fonts/Manrope-OFL.txt) and [Newsreader](src/fonts/Newsreader-OFL.txt) for the typefaces.
+- [Remotion](https://www.remotion.dev/) for the promo video.
+
+### Licence
+
+Readlay's application code and original cover artwork use the [MIT licence](LICENSE).
+
+Books, generated narration and third-party models have separate rights. They are not covered by Readlay's licence. Font licences are included in [src/fonts](src/fonts).

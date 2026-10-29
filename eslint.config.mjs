@@ -17,6 +17,7 @@ const eslintConfig = defineConfig([
     ".codex/**",
     ".jury/**",
     ".shots/**",
+    "readlay-promo/**",
   ]),
 ]);
 

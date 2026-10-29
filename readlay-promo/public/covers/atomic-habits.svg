@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Atomic Habits by James Clear</title>
+  <desc id="desc">An original Readlay concept cover in dark green and muted yellow, with an opening circle.</desc>
+  <rect width="600" height="900" fill="#254D3E"/>
+  <path d="M28 0V900" stroke="#EEEBDD" stroke-opacity=".24"/>
+  <text x="62" y="81" font-family="Arial, sans-serif" font-size="20" letter-spacing="3" fill="#EEEBDD">JAMES CLEAR</text>
+  <text x="58" y="242" font-family="Georgia, serif" font-size="100" letter-spacing="-5" fill="#F2EFE5">Atomic</text>
+  <text x="58" y="348" font-family="Georgia, serif" font-size="100" letter-spacing="-5" fill="#F2EFE5">Habits</text>
+  <circle cx="355" cy="616" r="168" fill="#D5B96C"/>
+  <circle cx="355" cy="616" r="119" fill="#254D3E"/>
+  <path d="M355 447V786" stroke="#EEEBDD" stroke-width="2"/>
+  <path d="M186 616H524" stroke="#EEEBDD" stroke-width="2"/>
+  <rect x="349" y="438" width="180" height="179" fill="#254D3E"/>
+  <circle cx="355" cy="616" r="12" fill="#EEEBDD"/>
+  <text x="62" y="843" font-family="Arial, sans-serif" font-size="13" letter-spacing="2.1" fill="#EEEBDD">READLAY CONCEPT COVER</text>
+</svg>
