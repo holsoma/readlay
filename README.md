@@ -25,8 +25,6 @@ Read ebooks, switch to prepared narration at a selected word, and save vocabular
   </picture>
 </a>
 
-<sub>Silent demo with original sample text.</sub>
-
 </div>
 
 ## Features
