@@ -39,13 +39,15 @@ npm run poster -- --browser-executable="C:\Program Files\Google\Chrome\Applicati
 
 ## README inclusion
 
-The repository README shows a looping GIF of the full video, linked to the original MP4. A `picture` source displays the still image when the viewer prefers reduced motion. For a simple Markdown embed:
+The repository README embeds the MP4 as a GitHub video player. GitHub's attachment URL must be the only content in its paragraph:
 
 ```markdown
-[![Watch Readlay: read, listen and keep your place](docs/media/readlay-preview.gif)](docs/media/readlay-promo.mp4)
+https://github.com/user-attachments/assets/72e47759-0a4c-454b-b4cc-e7df9bc86021
 ```
 
-Commit all three media files with the README. The animation plays inline as an image; selecting it opens the MP4.
+This attachment contains the same video as `docs/media/readlay-promo.mp4`. After changing the video, render the MP4, attach it through GitHub's Markdown editor, and replace the URL in both READMEs with the new attachment URL. Keep the URL outside links, code blocks and HTML containers so GitHub can render its player. Uploading an attachment does not require posting an issue or comment.
+
+Keep the MP4, still image and GIF in the repository for downloads and other Markdown viewers. For viewers without GitHub's video support, the animated image can be embedded with `![Readlay demo](docs/media/readlay-preview.gif)`.
 
 To recreate the animated preview after rendering, run this from the repository root with FFmpeg installed:
 

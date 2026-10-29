@@ -14,18 +14,11 @@ Read ebooks, switch to prepared narration at a selected word, and save vocabular
 [![Licence: MIT](https://img.shields.io/badge/Licence-MIT-315B45?style=flat&labelColor=252D28)](LICENSE)
 [![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-315B45?style=flat&labelColor=252D28)](docs/SETUP.md)
 
-[Open Readlay](https://readlay.vercel.app) · [Features](#features) · [Setup guide](docs/SETUP.md) · [Report an issue](https://github.com/holsoma/readlay/issues)
-
-<br />
-
-<a href="docs/media/readlay-promo.mp4">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/readlay-poster.png" />
-    <img src="docs/media/readlay-preview.gif" alt="Readlay demo: browse books, select a word and switch to narration without losing your place" width="800" />
-  </picture>
-</a>
+[Open Readlay](https://readlay.vercel.app) · [Features](#features) · [Setup guide](docs/SETUP.md) · [Contribute](CONTRIBUTING.md) · [Report an issue](https://github.com/holsoma/readlay/issues)
 
 </div>
+
+https://github.com/user-attachments/assets/72e47759-0a4c-454b-b4cc-e7df9bc86021
 
 ## Features
 
@@ -68,10 +61,11 @@ Book text, generated recordings, model files and credentials are excluded from t
 | [Audio preparation](docs/AUDIO_PREPARATION.md) | Local Kokoro narration, word timing, voice preparation and uploads. |
 | [R2 usage protection](docs/R2_USAGE_PROTECTION.md) | Administrator setup, storage limits and request checks. These checks cannot guarantee zero charges. |
 | [Promo video](readlay-promo/README.md) | Edit the Remotion scenes and render the README video. |
+| [Contributing](CONTRIBUTING.md) | Development setup, tests, bug reports and pull requests. |
 
 ## Contributing
 
-Use [GitHub issues](https://github.com/holsoma/readlay/issues) for bugs and feature requests. For a bug, include your browser, the steps to reproduce it, and what you expected to happen. Keep credentials, private book text and generated recordings out of reports and pull requests.
+Read the [contribution guide](CONTRIBUTING.md) for development setup, checks and pull-request instructions. Use [GitHub issues](https://github.com/holsoma/readlay/issues) for bugs and feature requests. Keep credentials, private book text and generated recordings out of reports and pull requests.
 
 <details>
 <summary><strong>Development checks</strong></summary>
