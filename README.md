@@ -25,8 +25,6 @@ Read ebooks, switch to prepared narration at a selected word, and save vocabular
   </picture>
 </a>
 
-**[Watch the 15-second video](docs/media/readlay-promo.mp4)** · [View the still image](docs/media/readlay-poster.png)
-
 <sub>Silent demo with original sample text.</sub>
 
 </div>
